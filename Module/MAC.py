@@ -370,7 +370,7 @@ if __name__ == '__main__':
     t = time.time()
 
     async def test():
-        a = MACTable("10.163.102.122", "Mrtg.Netease", "dell")
+        a = MACTable("172.21.64.18", "vdiannet", "cisco")
         res = await a.getMACTables()
         print(len(res))
         for i in res:
