@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# SNMP Collector Docker 构建脚本
-# 用于构建 snmp_collector 的 Docker 镜像
+# Collector Docker 构建脚本
+# 用于构建 collector 的 Docker 镜像
 
 set -e
 
 # 配置变量
-IMAGE_NAME="snmp_collector"
+IMAGE_NAME="collector"
 IMAGE_TAG="${1:-v1}"
 DOCKERFILE_PATH="Dockerfile"
 BUILD_CONTEXT=".."
@@ -18,7 +18,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  SNMP Collector Docker 镜像构建${NC}"
+echo -e "${GREEN}  Collector Docker 镜像构建${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${YELLOW}镜像名称:${NC} ${IMAGE_NAME}:${IMAGE_TAG}"

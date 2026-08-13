@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SNMP Collector 日志查看脚本
+# Collector 日志查看脚本
 # 快速查看和排查 Docker 容器日志
 
 set -e
@@ -18,7 +18,7 @@ NC='\033[0m'
 
 # 显示帮助信息
 show_help() {
-    echo -e "${GREEN}SNMP Collector 日志查看工具${NC}"
+    echo -e "${GREEN}Collector 日志查看工具${NC}"
     echo ""
     echo "用法: $0 [选项]"
     echo ""

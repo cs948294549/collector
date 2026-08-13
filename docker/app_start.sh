@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# SNMP Collector Docker 启动脚本
-# 用于启动 snmp_collector 容器
+# Collector Docker 启动脚本
+# 用于启动 collector 容器
 
 set -e
 
@@ -29,7 +29,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  SNMP Collector Docker 容器启动${NC}"
+echo -e "${GREEN}  Collector Docker 容器启动${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${YELLOW}容器名称:${NC} ${CONTAINER_NAME}"
