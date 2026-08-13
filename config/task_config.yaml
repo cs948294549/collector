@@ -1,0 +1,102 @@
+# 任务配置文件
+# 支持 cron 和 interval 两种调度方式
+
+tasks:
+  # 设备信息采集任务
+  - id: collect_device_info
+    type: cron
+    module: scripts.collect_device
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集设备基础信息"
+    enabled: true
+
+  # ARP 表采集任务（IPv4）
+  - id: collect_arp_table
+    type: cron
+    module: scripts.collect_arp
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集ARP表信息（IPv4）"
+    enabled: true
+
+  # IPv6 邻居表采集任务（默认禁用）
+  - id: collect_arpv6_table
+    type: cron
+    module: scripts.collect_arpv6
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集IPv6邻居表信息"
+    enabled: false
+
+  # MAC 地址表采集任务
+  - id: collect_mac_table
+    type: cron
+    module: scripts.collect_mac
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集MAC地址表"
+    enabled: true
+
+  # 端口状态采集任务
+  - id: collect_port_status
+    type: cron
+    module: scripts.collect_port
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集端口状态信息"
+    enabled: true
+
+  # LLDP 邻居信息采集
+  - id: collect_lldp
+    type: cron
+    module: scripts.collect_lldp
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集LLDP邻居信息"
+    enabled: true
+
+  # 路由表采集任务
+  - id: collect_route_table
+    type: cron
+    module: scripts.collect_route
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集路由表信息"
+    enabled: true
+
+  # IPv4网关信息采集任务
+  - id: collect_gate_info
+    type: cron
+    module: scripts.collect_gate
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集IPv4网关信息"
+    enabled: true
+
+  # IPv6网关信息采集任务（默认禁用）
+  - id: collect_gate_ipv6_info
+    type: cron
+    module: scripts.collect_gate_ipv6
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集IPv6网关信息"
+    enabled: false
+
+  # 设备物理信息采集任务
+  - id: collect_physical_info
+    type: cron
+    module: scripts.collect_physical
+    function: run
+    schedule: "*/30 * * * *"  # 每30分钟执行一次
+    description: "采集设备物理信息和序列号"
+    enabled: true
+
+  # 数据清理任务
+  - id: clean_old_data
+    type: cron
+    module: scripts.clean_data
+    function: run
+    schedule: "0 2 * * *"  # 每天凌晨2点执行
+    description: "清理过期数据"
+    enabled: true
