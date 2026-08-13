@@ -12,6 +12,11 @@ CREATE TABLE IF NOT EXISTS iplist (
     INDEX idx_admin_status (admin_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备IP清单表';
 
+-- 插入示例数据（根据实际情况修改）
+-- INSERT INTO device_list (ip, sysname, community, admin_status) VALUES
+-- ('192.168.1.1', 'switch-core-01', 'public', 0),
+-- ('192.168.1.2', 'switch-access-01', 'public', 0);
+
 -- 1. 设备基础���息表
 CREATE TABLE IF NOT EXISTS devices (
     ip VARCHAR(64) COLLATE utf8_bin NOT NULL COMMENT 'ip地址',
@@ -135,17 +140,3 @@ CREATE TABLE IF NOT EXISTS dev_sn (
     PRIMARY KEY(ip, sn_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备序列号信息表';
 
--- 10. 设备列表表（用于存储需要采集的设备）
-CREATE TABLE IF NOT EXISTS device_list (
-    ip VARCHAR(64) COLLATE utf8_bin NOT NULL COMMENT 'ip地址',
-    sysname VARCHAR(300) COLLATE utf8_bin NULL COMMENT '系统名',
-    community VARCHAR(100) COLLATE utf8_bin DEFAULT 'public' COMMENT 'SNMP Community',
-    admin_status INT DEFAULT 0 COMMENT '管理状态 0:启用 1:禁用',
-    timestamp VARCHAR(100) COLLATE utf8_bin NULL COMMENT '更新时间',
-    PRIMARY KEY(ip)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备列表';
-
--- 插入示例数据（根据实际情况修改）
--- INSERT INTO device_list (ip, sysname, community, admin_status) VALUES
--- ('192.168.1.1', 'switch-core-01', 'public', 0),
--- ('192.168.1.2', 'switch-access-01', 'public', 0);

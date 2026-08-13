@@ -184,15 +184,24 @@ class TaskScheduler:
         """获取所有任务信息"""
         task_info = []
         for task_id, task_data in self.tasks.items():
-            job = task_data['job']
-            task_info.append({
+            info = {
                 'id': task_id,
-                'name': job.name,
+                'name': task_data.get('description', task_id),
                 'type': task_data['type'],
                 'schedule': task_data['schedule'],
                 'description': task_data['description'],
-                'next_run_time': job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job.next_run_time else 'N/A'
-            })
+                'next_run_time': 'N/A'
+            }
+
+            # 尝试从调度器获取实际的job对象
+            try:
+                job = self.scheduler.get_job(task_id)
+                if job and hasattr(job, 'next_run_time') and job.next_run_time:
+                    info['next_run_time'] = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                pass
+
+            task_info.append(info)
         return task_info
 
     def start(self):

@@ -103,15 +103,15 @@ class CollectorApp:
         # 注册任务
         self.register_tasks()
 
-        # 显示已注册的任务
+        # 启动调度器
+        self.scheduler.start()
+        self.running = True
+
+        # 显示已注册的任务（在调度器启动后）
         tasks = self.scheduler.get_tasks()
         logger.info(f"\n共注册 {len(tasks)} 个任务:")
         for task in tasks:
             logger.info(f"  - {task['name']} ({task['type']}) - 下次运行: {task['next_run_time']}")
-
-        # 启动调度器
-        self.scheduler.start()
-        self.running = True
 
         logger.info("\n采集器已启动，按 Ctrl+C 退出")
 
