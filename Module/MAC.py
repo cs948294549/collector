@@ -37,9 +37,12 @@ class MACTable(object):
         elif "inspur" in self.sys_type:
             mac_table = await self.__getInspurMACtable()
             return mac_table
-        # elif "cisco" in self.sys_type:
-        #     mac_table = await self.__getCiscoMACtable()
-        #     return mac_table
+        elif "nx-os" in self.sys_type:
+            mac_table = await self.__getCiscoNXMACtable()
+            return mac_table
+        elif "cisco" in self.sys_type:
+            mac_table = await self.__getCiscoMACtable()
+            return mac_table
         else:
             mac_table = await self.__getDefaultMACtable()
             return mac_table
@@ -275,6 +278,51 @@ class MACTable(object):
             print("MAC采集异常=", self.ip, str(e))
             return None
 
+    async def __getCiscoNXMACtable(self):
+        '''
+        Cisco NX-OS 设备
+        mac = 1.3.6.1.2.1.17.7.1.2.2.1.2
+        OID索引 = VLAN_ID.MAC[6]  VALUE=basePort
+        basePort 转换为 ifIndex: ifIndex = basePort + 369094656
+        '''
+        oid_nodes = {
+            "mac_port": "1.3.6.1.2.1.17.7.1.2.2.1.2",
+        }
+        try:
+            timestamp = int(time.time())
+            timestamp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+
+            oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["mac_port"], max_repetitions=10)
+
+            # Cisco NX-OS 的 basePort 到 ifIndex 的固定偏移量
+            BASE_PORT_OFFSET = 369094656
+
+            final_mactable = []
+            for oid in oid_infos.keys():
+                base_port = oid_infos[oid]
+                if base_port is None or base_port == 0:
+                    continue
+
+                # 转换 basePort 到 ifIndex
+                if_index = base_port + BASE_PORT_OFFSET
+
+                key = oid.replace(oid_nodes["mac_port"], "")[1:]
+                oid_list = key.split(".")
+
+                mac_info = {}
+                mac_info["ip"] = self.ip
+                mac_info["timestamp"] = timestamp_str
+                mac_info["vlan_id"] = oid_list[0]
+                mac_info["mac_address"] = ":".join([hex(int(i)).replace("0x", "").zfill(2).upper() for i in oid_list[1:]])
+                mac_info["port_id"] = if_index
+
+                final_mactable.append(mac_info)
+
+            return final_mactable
+        except Exception as e:
+            print("MAC采集异常(Cisco NX-OS)=", self.ip, str(e))
+            return None
+
     async def __getCiscoMACtable(self):
         '''
         VLANID = 1.3.6.1.4.1.9.9.46.1.3.1.1.4.1 [primary]
@@ -370,7 +418,7 @@ if __name__ == '__main__':
     t = time.time()
 
     async def test():
-        a = MACTable("172.21.64.18", "vdiannet", "cisco")
+        a = MACTable("172.21.64.18", "vdiannet", "nx-os")
         res = await a.getMACTables()
         print(len(res))
         for i in res:
