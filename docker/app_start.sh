@@ -6,8 +6,8 @@
 set -e
 
 # 配置变量
-CONTAINER_NAME="snmp_collector"
-IMAGE_NAME="snmp_collector"
+CONTAINER_NAME="collector"
+IMAGE_NAME="collector"
 IMAGE_TAG="${1:-v1}"
 
 # 数据库配置（从环境变量或使用默认值）
@@ -17,8 +17,8 @@ DB_USER="${DB_USER:-root}"
 DB_PASSWORD="${DB_PASSWORD:-}"
 DB_NAME="${DB_NAME:-network_monitor}"
 
-# 数据目录配置
-DATA_BASE_DIR="${COLLECTOR_DATA_DIR:-/root/docker_apps/snmp_collector}"
+# 数据目录配置（默认为当前目录）
+DATA_BASE_DIR="${COLLECTOR_DATA_DIR:-$(pwd)}"
 LOGS_DIR="${DATA_BASE_DIR}/logs"
 CONFIG_DIR="${DATA_BASE_DIR}/config"
 

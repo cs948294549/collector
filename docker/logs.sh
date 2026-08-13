@@ -5,8 +5,8 @@
 
 set -e
 
-CONTAINER_NAME="snmp_collector"
-DATA_BASE_DIR="${COLLECTOR_DATA_DIR:-/root/docker_apps/snmp_collector}"
+CONTAINER_NAME="collector"
+DATA_BASE_DIR="${COLLECTOR_DATA_DIR:-$(pwd)}"
 LOGS_DIR="${DATA_BASE_DIR}/logs"
 
 # 颜色输出
