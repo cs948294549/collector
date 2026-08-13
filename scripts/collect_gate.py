@@ -20,7 +20,7 @@ async def collect_single_device_gate(ip: str, community: str, sys_type: str):
     """采集单个设备的IPv4网关信息"""
     try:
         gate = Gate(ip, community, sys_type)
-        gate_data = await gate.getGateTable()
+        gate_data = await gate.getGates()
         return {
             'ip': ip,
             'gates': gate_data

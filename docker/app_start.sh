@@ -66,8 +66,8 @@ echo ""
 
 # 检查数据库配置
 if [ -z "${DB_PASSWORD}" ]; then
-    echo -e "${RED}警告: 数据库密码未设置${NC}"
-    echo -e "${YELLOW}请设置环境变量 DB_PASSWORD${NC}"
+    echo -e "${YELLOW}提示: 未设置环境变量 DB_PASSWORD${NC}"
+    echo -e "${YELLOW}将使用配置文件 config/config.py 中的数据库配置${NC}"
     echo ""
 fi
 

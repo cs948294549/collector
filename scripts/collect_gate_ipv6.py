@@ -20,7 +20,7 @@ async def collect_single_device_gate_ipv6(ip: str, community: str, sys_type: str
     """采集单个设备的IPv6网关信息"""
     try:
         gate_ipv6 = Gate_ipv6(ip, community, sys_type)
-        gate_ipv6_data = await gate_ipv6.getGateIPv6Table()
+        gate_ipv6_data = await gate_ipv6.getGates()
         return {
             'ip': ip,
             'gates_ipv6': gate_ipv6_data
