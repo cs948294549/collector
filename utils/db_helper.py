@@ -138,8 +138,8 @@ class DBHelper:
                         if isinstance(arp, dict):
                             values.append((
                                 device_ip,
-                                arp.get('mac', ''),
-                                arp.get('ip', ''),
+                                arp.get('arp_mac', ''),
+                                arp.get('arp_ip', ''),
                                 arp.get('port_id', 0),
                                 arp.get('timestamp', '')
                             ))
