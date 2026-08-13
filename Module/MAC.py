@@ -37,9 +37,6 @@ class MACTable(object):
         elif "inspur" in self.sys_type:
             mac_table = await self.__getInspurMACtable()
             return mac_table
-        elif "nx-os" in self.sys_type:
-            mac_table = await self.__getCiscoNXMACtable()
-            return mac_table
         elif "cisco" in self.sys_type:
             mac_table = await self.__getCiscoMACtable()
             return mac_table

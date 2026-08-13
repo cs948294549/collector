@@ -180,7 +180,7 @@ class DBHelper:
                             values.append((
                                 device_ip,
                                 mac.get('vlan_id', 0),
-                                mac.get('mac', ''),
+                                mac.get('mac_address', ''),
                                 mac.get('port_id', 0),
                                 mac.get('timestamp', '')
                             ))
