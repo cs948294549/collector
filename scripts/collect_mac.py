@@ -20,7 +20,7 @@ async def collect_single_device_mac(ip: str, community: str, sys_type: str):
     """采集单个设备的MAC地址表"""
     try:
         mac = MACTable(ip, community, sys_type)
-        mac_data = await mac.getMACs()
+        mac_data = await mac.getMACTables()
         return {
             'ip': ip,
             'mac_table': mac_data
