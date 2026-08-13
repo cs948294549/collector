@@ -3,6 +3,13 @@
 """
 import asyncio
 import logging
+import sys
+from pathlib import Path
+
+# 将项目根目录添加到 Python 路径
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 from Module.Physical import PhysicalInfo
 from utils.db_helper import DBHelper
 
@@ -41,7 +48,7 @@ async def collect_and_save_batch(device_batch, batch_id):
             save_batch_size = 200
             for i in range(0, len(valid_results), save_batch_size):
                 save_batch = valid_results[i:i + save_batch_size]
-                db.save_physical_info(save_batch)
+                db.save_dev_sn_info(save_batch)
             db.close()
             logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，成功保存 {len(valid_results)} 台")
         except Exception as e:

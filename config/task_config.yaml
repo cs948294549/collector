@@ -63,7 +63,7 @@ tasks:
     function: run
     schedule: "*/30 * * * *"  # 每30分钟执行一次
     description: "采集路由表信息"
-    enabled: true
+    enabled: false
 
   # IPv4网关信息采集任务
   - id: collect_gate_info

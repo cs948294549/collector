@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS iplist (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备IP清单表';
 
 -- 插入示例数据（根据实际情况修改）
--- INSERT INTO device_list (ip, sysname, community, admin_status) VALUES
+-- INSERT INTO iplist (ip, sysname, community, admin_status) VALUES
 -- ('192.168.1.1', 'switch-core-01', 'public', 0),
 -- ('192.168.1.2', 'switch-access-01', 'public', 0);
 
