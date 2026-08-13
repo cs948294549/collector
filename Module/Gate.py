@@ -253,19 +253,19 @@ class Gate(object):
         try:
             oid_cache = {}
             oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["port_id"], max_repetitions=20)
-            try:
-                oid_infos1 = await snmpwalk(ip=self.ip, community=self.community+"@mgmt", oid=oid_nodes["port_id"],
-                                           max_repetitions=20)
-                oid_infos.update(oid_infos1)
-            except Exception as e:
-                print("vrf获取portid失败", e)
-
-            try:
-                oid_infos2 = await snmpwalk(ip=self.ip, community=self.community+"@management", oid=oid_nodes["port_id"],
-                                           max_repetitions=20)
-                oid_infos.update(oid_infos2)
-            except Exception as e:
-                print("vrf获取portid失败", e)
+            # try:
+            #     oid_infos1 = await snmpwalk(ip=self.ip, community=self.community+"@mgmt", oid=oid_nodes["port_id"],
+            #                                max_repetitions=20)
+            #     oid_infos.update(oid_infos1)
+            # except Exception as e:
+            #     print("vrf获取portid失败", e)
+            #
+            # try:
+            #     oid_infos2 = await snmpwalk(ip=self.ip, community=self.community+"@management", oid=oid_nodes["port_id"],
+            #                                max_repetitions=20)
+            #     oid_infos.update(oid_infos2)
+            # except Exception as e:
+            #     print("vrf获取portid失败", e)
 
             for oid in oid_infos.keys():
                 if oid_infos[oid] is None:
@@ -278,19 +278,19 @@ class Gate(object):
                     oid_cache[key]["port_id"] = str(oid_infos[oid])
 
             oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["mask"], max_repetitions=20)
-            try:
-                oid_infos1 = await snmpwalk(ip=self.ip, community=self.community+"@mgmt", oid=oid_nodes["mask"],
-                                           max_repetitions=20)
-                oid_infos.update(oid_infos1)
-            except Exception as e:
-                print("vrf获取mask失败", e)
-
-            try:
-                oid_infos2 = await snmpwalk(ip=self.ip, community=self.community+"@management", oid=oid_nodes["mask"],
-                                           max_repetitions=20)
-                oid_infos.update(oid_infos2)
-            except Exception as e:
-                print("vrf获取mask失败", e)
+            # try:
+            #     oid_infos1 = await snmpwalk(ip=self.ip, community=self.community+"@mgmt", oid=oid_nodes["mask"],
+            #                                max_repetitions=20)
+            #     oid_infos.update(oid_infos1)
+            # except Exception as e:
+            #     print("vrf获取mask失败", e)
+            #
+            # try:
+            #     oid_infos2 = await snmpwalk(ip=self.ip, community=self.community+"@management", oid=oid_nodes["mask"],
+            #                                max_repetitions=20)
+            #     oid_infos.update(oid_infos2)
+            # except Exception as e:
+            #     print("vrf获取mask失败", e)
 
             for oid in oid_infos.keys():
                 if oid_infos[oid] is None:
