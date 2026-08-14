@@ -28,6 +28,7 @@ from scripts import (
     collect_gate,
     collect_physical,
 )
+from utils.db_queue import get_db_queue
 
 
 async def run_all_tasks():
@@ -36,50 +37,62 @@ async def run_all_tasks():
     logger.info("开始执行所有采集任务...")
     logger.info("=" * 60)
 
+    # 启动数据库队列
+    queue = get_db_queue()
+    await queue.start()
+    logger.info("数据库写入队列已启动")
+
     start_time = asyncio.get_event_loop().time()
 
-    # 创建所有任务
-    tasks = [
-        ("设备信息", collect_device.run()),
-        ("ARP表", collect_arp.run()),
-        ("MAC地址表", collect_mac.run()),
-        ("端口状态", collect_port.run()),
-        ("LLDP邻居", collect_lldp.run()),
-        ("网关信息", collect_gate.run()),
-        ("设备物理信息", collect_physical.run()),
-    ]
+    try:
+        # 创建所有任务
+        tasks = [
+            ("设备信息", collect_device.run()),
+            ("ARP表", collect_arp.run()),
+            ("MAC地址表", collect_mac.run()),
+            ("端口状态", collect_port.run()),
+            ("LLDP邻居", collect_lldp.run()),
+            ("网关信息", collect_gate.run()),
+            ("设备物理信息", collect_physical.run()),
+        ]
 
-    # 并行执行所有任务
-    logger.info(f"共 {len(tasks)} 个任务并行执行中...\n")
+        # 并行执行所有任务
+        logger.info(f"共 {len(tasks)} 个任务并行执行中...\n")
 
-    results = await asyncio.gather(
-        *[task[1] for task in tasks],
-        return_exceptions=True
-    )
+        results = await asyncio.gather(
+            *[task[1] for task in tasks],
+            return_exceptions=True
+        )
 
-    # 统计结果
-    logger.info("\n" + "=" * 60)
-    logger.info("任务执行结果:")
-    logger.info("=" * 60)
+        # 统计结果
+        logger.info("\n" + "=" * 60)
+        logger.info("任务执行结果:")
+        logger.info("=" * 60)
 
-    success_count = 0
-    failed_count = 0
+        success_count = 0
+        failed_count = 0
 
-    for i, (name, result) in enumerate(zip([t[0] for t in tasks], results)):
-        if isinstance(result, Exception):
-            logger.error(f"✗ {name}: 失败 - {result}")
-            failed_count += 1
-        else:
-            logger.info(f"✓ {name}: 完成")
-            success_count += 1
+        for i, (name, result) in enumerate(zip([t[0] for t in tasks], results)):
+            if isinstance(result, Exception):
+                logger.error(f"✗ {name}: 失败 - {result}")
+                failed_count += 1
+            else:
+                logger.info(f"✓ {name}: 完成")
+                success_count += 1
 
-    end_time = asyncio.get_event_loop().time()
-    elapsed = end_time - start_time
+        end_time = asyncio.get_event_loop().time()
+        elapsed = end_time - start_time
 
-    logger.info("=" * 60)
-    logger.info(f"全部任务完成 - 成功: {success_count}, 失败: {failed_count}")
-    logger.info(f"总耗时: {elapsed:.2f}秒")
-    logger.info("=" * 60)
+        logger.info("=" * 60)
+        logger.info(f"全部任务完成 - 成功: {success_count}, 失败: {failed_count}")
+        logger.info(f"总耗时: {elapsed:.2f}秒")
+        logger.info("=" * 60)
+
+    finally:
+        # 停止队列并等待所有数据写入完成
+        logger.info("等待队列处理完成...")
+        await queue.stop()
+        logger.info("数据库写入队列已停止")
 
 
 async def run_tasks_sequential():
@@ -87,6 +100,11 @@ async def run_tasks_sequential():
     logger.info("=" * 60)
     logger.info("开始顺序执行所有采集任务...")
     logger.info("=" * 60)
+
+    # 启动数据库队列
+    queue = get_db_queue()
+    await queue.start()
+    logger.info("数据库写入队列已启动")
 
     start_time = asyncio.get_event_loop().time()
 
@@ -103,23 +121,30 @@ async def run_tasks_sequential():
     success_count = 0
     failed_count = 0
 
-    for i, (name, task_func) in enumerate(tasks, 1):
-        logger.info(f"\n[{i}/{len(tasks)}] 执行: {name}")
-        try:
-            await task_func()
-            logger.info(f"✓ {name}: 完成")
-            success_count += 1
-        except Exception as e:
-            logger.error(f"✗ {name}: 失败 - {e}")
-            failed_count += 1
+    try:
+        for i, (name, task_func) in enumerate(tasks, 1):
+            logger.info(f"\n[{i}/{len(tasks)}] 执行: {name}")
+            try:
+                await task_func()
+                logger.info(f"✓ {name}: 完成")
+                success_count += 1
+            except Exception as e:
+                logger.error(f"✗ {name}: 失败 - {e}")
+                failed_count += 1
 
-    end_time = asyncio.get_event_loop().time()
-    elapsed = end_time - start_time
+        end_time = asyncio.get_event_loop().time()
+        elapsed = end_time - start_time
 
-    logger.info("\n" + "=" * 60)
-    logger.info(f"全部任务完成 - 成功: {success_count}, 失败: {failed_count}")
-    logger.info(f"总耗时: {elapsed:.2f}秒")
-    logger.info("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info(f"全部任务完成 - 成功: {success_count}, 失败: {failed_count}")
+        logger.info(f"总耗时: {elapsed:.2f}秒")
+        logger.info("=" * 60)
+
+    finally:
+        # 停止队列并等待所有数据写入完成
+        logger.info("等待队列处理完成...")
+        await queue.stop()
+        logger.info("数据库写入队列已停止")
 
 
 if __name__ == '__main__':

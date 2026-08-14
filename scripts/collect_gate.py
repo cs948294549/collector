@@ -87,14 +87,10 @@ async def run():
     """
     主执行函数 - 采集所有设备的IPv4网关信息
     分批采集和保存，避免等待时间过长
+    注意：此函数不管理队列生命周期，由调用方负责
     """
     logger.info("开始执行IPv4网关信息采集任务")
     start_time = asyncio.get_event_loop().time()
-
-    # 启动数据库队列
-    queue = get_db_queue()
-    await queue.start()
-    logger.info("数据库写入队列已启动")
 
     try:
         with DBHelper() as db:
@@ -123,8 +119,17 @@ async def run():
 
     except Exception as e:
         logger.error(f"IPv4网关信息采集任务执行失败: {e}")
+
+
+async def main():
+    """独立运行时的入口函数，管理队列生命周期"""
+    queue = get_db_queue()
+    await queue.start()
+    logger.info("数据库写入队列已启动")
+
+    try:
+        await run()
     finally:
-        # 停止队列并等待所有数据写入完成
         logger.info("等待队列处理完成...")
         await queue.stop()
         logger.info("数据库写入队列已停止")
@@ -132,4 +137,4 @@ async def run():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run())
+    asyncio.run(main())
