@@ -1,0 +1,31 @@
+# 并发控制配置
+
+# 全局最大并发SNMP连接数
+# 建议值：根据系统文件描述符限制调整
+# - macOS 默认限制通常为 256-1024
+# - Linux 可以通过 ulimit -n 查看
+# - 建议设置为限制值的 50-70%
+max_concurrent_snmp: 50
+
+# 每批次设备数量
+# 较小的批次可以更快看到进度，但总耗时可能稍长
+batch_size: 10
+
+# 数据库写入队列配置
+db_queue:
+  # 队列最大长度
+  max_size: 10000
+
+  # 批量写入大小
+  batch_size: 100
+
+  # 批量写入超时（秒）
+  batch_timeout: 2.0
+
+# 采集任务配置
+tasks:
+  # 是否使用消息队列进行数据库写入
+  use_queue: true
+
+  # 是否启用并发限制
+  enable_concurrency_limit: true

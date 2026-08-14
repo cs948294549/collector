@@ -13,22 +13,25 @@ sys.path.insert(0, str(project_root))
 from Module.ARP import ARPTable
 from utils.db_helper import DBHelper
 from utils.db_queue import get_db_queue
+from utils.concurrency_limiter import get_concurrency_limiter
 
 logger = logging.getLogger(__name__)
 
 
 async def collect_single_device_arp(ip: str, community: str, sys_type: str):
     """采集单个设备的ARP表"""
-    try:
-        arp = ARPTable(ip, community, sys_type)
-        arp_data = await arp.getARPs()
-        return {
-            'ip': ip,
-            'arp': arp_data
-        }
-    except Exception as e:
-        logger.error(f"采集设备 {ip} ARP表失败: {e}")
-        return None
+    limiter = get_concurrency_limiter()
+    async with limiter:
+        try:
+            arp = ARPTable(ip, community, sys_type)
+            arp_data = await arp.getARPs()
+            return {
+                'ip': ip,
+                'arp': arp_data
+            }
+        except Exception as e:
+            logger.error(f"采集设备 {ip} ARP表失败: {e}")
+            return None
 
 
 async def collect_and_save_batch(device_batch, batch_id, use_queue=True):
@@ -57,7 +60,7 @@ async def collect_and_save_batch(device_batch, batch_id, use_queue=True):
             else:
                 # 直接写入数据库（保留旧方式作为fallback）
                 with DBHelper() as db:
-                    save_batch_size = 200
+                    save_batch_size = 10  # 减小批次避免过多并发0
                     for i in range(0, len(valid_results), save_batch_size):
                         save_batch = valid_results[i:i + save_batch_size]
                         db.save_arp_info(save_batch)
@@ -87,10 +90,10 @@ async def run():
         logger.info(f"获取到 {total_devices} 台设备")
 
         # 分批处理，每批20台设备
-        batch_size = 20
+        batch_size = 10  # 减小批次避免过多并发
         batches = [device_list[i:i + batch_size] for i in range(0, total_devices, batch_size)]
 
-        logger.info(f"分为 {len(batches)} 个批次进行采集")
+        logger.info(f"分为 {len(batches)} 个批次进行采集（最大并发: 50）")
 
         # 并发执行所有批次
         batch_tasks = []
