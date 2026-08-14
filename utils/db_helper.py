@@ -536,3 +536,12 @@ class DBHelper:
                 self.conn.close()
         except Exception as e:
             logger.error(f"关闭数据库连接失败: {e}")
+
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器退出"""
+        self.close()
+        return False

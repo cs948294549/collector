@@ -61,9 +61,8 @@ async def run():
     start_time = asyncio.get_event_loop().time()
 
     try:
-        db = DBHelper()
-        device_list = db.get_device_list()
-        db.close()
+        with DBHelper() as db:
+            device_list = db.get_device_list()
 
         total_devices = len(device_list)
         logger.info(f"获取到 {total_devices} 台设备")
