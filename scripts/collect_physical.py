@@ -91,6 +91,11 @@ async def run():
     logger.info("开始执行设备物理信息采集任务")
     start_time = asyncio.get_event_loop().time()
 
+    # 启动数据库队列
+    queue = get_db_queue()
+    await queue.start()
+    logger.info("数据库写入队列已启动")
+
     try:
         with DBHelper() as db:
             device_list = db.get_device_list()
@@ -118,6 +123,11 @@ async def run():
 
     except Exception as e:
         logger.error(f"设备物理信息采集任务执行失败: {e}")
+    finally:
+        # 停止队列并等待所有数据写入完成
+        logger.info("等待队列处理完成...")
+        await queue.stop()
+        logger.info("数据库写入队列已停止")
 
 
 if __name__ == "__main__":

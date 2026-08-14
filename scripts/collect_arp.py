@@ -95,6 +95,11 @@ async def run():
     logger.info("开始执行ARP表采集任务（IPv4）")
     start_time = asyncio.get_event_loop().time()
 
+    # 启动数据库队列
+    queue = get_db_queue()
+    await queue.start()
+    logger.info("数据库写入队列已启动")
+
     try:
         # 从数据库获取设备列表
         with DBHelper() as db:
@@ -132,6 +137,11 @@ async def run():
 
     except Exception as e:
         logger.error(f"ARP表采集任务执行失败: {e}")
+    finally:
+        # 停止队列并等待所有数据写入完成
+        logger.info("等待队列处理完成...")
+        await queue.stop()
+        logger.info("数据库写入队列已停止")
 
 
 if __name__ == "__main__":
