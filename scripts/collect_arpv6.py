@@ -45,6 +45,19 @@ async def collect_and_save_batch(device_batch, batch_id, use_queue=True):
         tasks.append(collect_single_device_arpv6(ip, community, sys_type))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 统计结果
+    success_count = 0
+    error_count = 0
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            error_count += 1
+            logger.error(f"批次 {batch_id} 设备 {device_batch[i].get('ip')} 采集异常: {result}")
+        elif result is None:
+            error_count += 1
+        else:
+            success_count += 1
+
     valid_results = [r for r in results if r is not None and not isinstance(r, Exception)]
 
     if valid_results:
@@ -61,6 +74,8 @@ async def collect_and_save_batch(device_batch, batch_id, use_queue=True):
                 logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，成功采集 {len(valid_results)} 台IPv6邻居表数据")
         except Exception as e:
             logger.error(f"批次 {batch_id}: 处理数据失败: {e}")
+    else:
+        logger.warning(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，全部失败")
 
     return len(valid_results), len(device_batch) - len(valid_results)
 
