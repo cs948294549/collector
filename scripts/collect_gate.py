@@ -12,6 +12,7 @@ sys.path.insert(0, str(project_root))
 
 from Module.Gate import Gate
 from utils.db_helper import DBHelper
+from utils.db_queue import get_db_queue
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ async def collect_single_device_gate(ip: str, community: str, sys_type: str):
         return None
 
 
-async def collect_and_save_batch(device_batch, batch_id):
+async def collect_and_save_batch(device_batch, batch_id, use_queue=True):
     """采集一批设备并保存"""
     tasks = []
     for device in device_batch:
@@ -44,12 +45,20 @@ async def collect_and_save_batch(device_batch, batch_id):
 
     if valid_results:
         try:
-            with DBHelper() as db:
-                save_batch_size = 200
-                for i in range(0, len(valid_results), save_batch_size):
-                    save_batch = valid_results[i:i + save_batch_size]
-                    db.save_gate_info(save_batch)
-            logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，成功保存 {len(valid_results)} 台")
+            if use_queue:
+                # 使用消息队列异步写入
+                queue = get_db_queue()
+                for result in valid_results:
+                    await queue.put('gate', result)
+                logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，{len(valid_results)} 台已加入写入队列")
+            else:
+                # 直接写入数据库（保留旧方式作为fallback）
+                with DBHelper() as db:
+                    save_batch_size = 200
+                    for i in range(0, len(valid_results), save_batch_size):
+                        save_batch = valid_results[i:i + save_batch_size]
+                        db.save_gate_info(save_batch)
+                    logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，成功保存 {len(valid_results)} 台")
         except Exception as e:
             logger.error(f"批次 {batch_id}: 保存数据失败: {e}")
 

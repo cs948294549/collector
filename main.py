@@ -9,6 +9,7 @@ import sys
 import yaml
 from pathlib import Path
 from scheduler import TaskScheduler
+from utils.db_queue import get_db_queue
 
 # 配置日志
 logging.basicConfig(
@@ -28,6 +29,7 @@ class CollectorApp:
     def __init__(self, config_file='config/task_config.yaml'):
         self.config_file = config_file
         self.scheduler = TaskScheduler()
+        self.db_queue = get_db_queue()  # 获取数据库写入队列实例
         self.running = False
 
     def load_task_config(self):
@@ -123,6 +125,15 @@ class CollectorApp:
             self.running = False
             logger.info("采集器已停止")
 
+    async def async_stop(self):
+        """异步停止采集器（包含队列停止）"""
+        if self.running:
+            logger.info("\n正在停止采集器...")
+            self.scheduler.shutdown()
+            await self.db_queue.stop()
+            self.running = False
+            logger.info("采集器已停止")
+
     def signal_handler(self, signum, frame):
         """信号处理"""
         logger.info(f"\n接收到信号 {signum}，准备退出...")
@@ -134,6 +145,10 @@ async def main():
     """主函数"""
     # 创建应用实例
     app = CollectorApp()
+
+    # 启动数据库写入队列
+    logger.info("正在启动数据库写入队列...")
+    await app.db_queue.start()
 
     # 注册信号处理
     signal.signal(signal.SIGINT, app.signal_handler)
@@ -151,6 +166,10 @@ async def main():
         logger.error(f"程序运行异常: {e}")
         app.stop()
         sys.exit(1)
+    finally:
+        # 停止数据库写入队列
+        logger.info("正在停止数据库写入队列...")
+        await app.db_queue.stop()
 
 
 if __name__ == '__main__':

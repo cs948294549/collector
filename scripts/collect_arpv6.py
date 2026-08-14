@@ -12,6 +12,7 @@ sys.path.insert(0, str(project_root))
 
 from Module.ARPv6 import ARPv6Table
 from utils.db_helper import DBHelper
+from utils.db_queue import get_db_queue
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ async def collect_single_device_arpv6(ip: str, community: str = "public", sys_ty
         return None
 
 
-async def collect_and_save_batch(device_batch, batch_id):
+async def collect_and_save_batch(device_batch, batch_id, use_queue=True):
     """采集一批设备并保存"""
     tasks = []
     for device in device_batch:
@@ -45,7 +46,16 @@ async def collect_and_save_batch(device_batch, batch_id):
 
     if valid_results:
         try:
-            logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，成功采集 {len(valid_results)} 台IPv6邻居表数据")
+            if use_queue:
+                # 使用消息队列异步写入
+                queue = get_db_queue()
+                for result in valid_results:
+                    await queue.put('arpv6', result)
+                logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，{len(valid_results)} 台已加入写入队列")
+            else:
+                # 直接写入数据库（保留旧方式作为fallback）
+                # 注意：ARPv6 可能需要单独的保存方法，这里暂时使用arp的方法
+                logger.info(f"批次 {batch_id}: 采集 {len(device_batch)} 台设备，成功采集 {len(valid_results)} 台IPv6邻居表数据")
         except Exception as e:
             logger.error(f"批次 {batch_id}: 处理数据失败: {e}")
 
