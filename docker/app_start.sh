@@ -10,13 +10,6 @@ CONTAINER_NAME="collector"
 IMAGE_NAME="collector"
 IMAGE_TAG="${1:-v1}"
 
-# 数据库配置（从环境变量或使用默认值）
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-3306}"
-DB_USER="${DB_USER:-root}"
-DB_PASSWORD="${DB_PASSWORD:-}"
-DB_NAME="${DB_NAME:-network_monitor}"
-
 # 数据目录配置（默认为当前目录）
 DATA_BASE_DIR="${COLLECTOR_DATA_DIR:-$(pwd)}"
 LOGS_DIR="${DATA_BASE_DIR}/logs"
@@ -34,7 +27,6 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${YELLOW}容器名称:${NC} ${CONTAINER_NAME}"
 echo -e "${YELLOW}镜像:${NC} ${IMAGE_NAME}:${IMAGE_TAG}"
-echo -e "${YELLOW}数据库:${NC} ${DB_HOST}:${DB_PORT}/${DB_NAME}"
 echo ""
 
 # 切换到脚本所在目录的父目录（项目根目录）
@@ -64,20 +56,13 @@ echo -e "${GREEN}✓${NC} 日志目录: ${LOGS_DIR}"
 echo -e "${GREEN}✓${NC} 配置目录: ${CONFIG_DIR}"
 echo ""
 
-# 检查数据库配置
-if [ -z "${DB_PASSWORD}" ]; then
-    echo -e "${YELLOW}提示: 未设置环境变量 DB_PASSWORD${NC}"
-    echo -e "${YELLOW}将使用配置文件 config/config.py 中的数据库配置${NC}"
-    echo ""
-fi
-
 # 复制配置文件到数据目录（如果不存在）
 if [ ! -f "${CONFIG_DIR}/config.py" ]; then
     echo -e "${YELLOW}复制默认配置文件...${NC}"
     cp config/config.py "${CONFIG_DIR}/"
     cp config/task_config.yaml "${CONFIG_DIR}/"
     echo -e "${GREEN}✓${NC} 配置文件已复制到 ${CONFIG_DIR}"
-    echo -e "${YELLOW}请编辑配置文件设置数据库连接信息${NC}"
+    echo -e "${YELLOW}请编辑 ${CONFIG_DIR}/config.py 设置数据库连接信息${NC}"
     echo ""
 fi
 
@@ -88,11 +73,6 @@ echo ""
 docker run -d \
     --name "${CONTAINER_NAME}" \
     --network host \
-    -e DB_HOST="${DB_HOST}" \
-    -e DB_PORT="${DB_PORT}" \
-    -e DB_USER="${DB_USER}" \
-    -e DB_PASSWORD="${DB_PASSWORD}" \
-    -e DB_NAME="${DB_NAME}" \
     -v "${LOGS_DIR}:/app/logs" \
     -v "${CONFIG_DIR}/config.py:/app/config/config.py" \
     -v "${CONFIG_DIR}/task_config.yaml:/app/config/task_config.yaml" \
