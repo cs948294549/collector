@@ -72,7 +72,7 @@ echo ""
 
 docker run -d \
     --name "${CONTAINER_NAME}" \
-    --network host \
+    -e PYTHONUNBUFFERED=1 \
     -v "${LOGS_DIR}:/app/logs" \
     -v "${CONFIG_DIR}/config.py:/app/config/config.py" \
     -v "${CONFIG_DIR}/task_config.yaml:/app/config/task_config.yaml" \
