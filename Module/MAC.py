@@ -382,13 +382,6 @@ class MACTable(object):
                                 port_alias = port_alias.decode("utf-8", "ignore")
                                 if "uT" in port_alias or "pT:" in port_alias:
                                     up_link.append(str(port_id))
-
-                            port_name = await snmpget(ip=self.ip, community=self.community, oid="1.3.6.1.2.1.2.2.1.2.%s" % str(port_id))
-                            if port_name is not None:
-                                port_name = port_name.decode("utf-8", "ignore")
-                                if port_name in ["Bridge-Aggregation1","Port-channel 1", "Port-channel1",
-                                                 "Port-channel10", "Port-Channel1000", "AggregatePort 1", "agg1"]:
-                                    up_link.append(str(port_id))
                         else:
                             dot_dict[dot] = 0
                     else:
