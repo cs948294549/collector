@@ -134,6 +134,10 @@ class DBHelper:
                     device_ip = item.get('ip', '')
                     arp_list = item.get('arp', [])
 
+                    # 检查 arp_list 是否为 None
+                    if arp_list is None:
+                        continue
+
                     for arp in arp_list:
                         if isinstance(arp, dict):
                             values.append((
@@ -174,6 +178,10 @@ class DBHelper:
                 if item and isinstance(item, dict):
                     device_ip = item.get('ip', '')
                     mac_table = item.get('mac_table', [])
+
+                    # 检查 mac_table 是否为 None
+                    if mac_table is None:
+                        continue
 
                     for mac in mac_table:
                         if isinstance(mac, dict):
@@ -221,6 +229,10 @@ class DBHelper:
                 if item and isinstance(item, dict):
                     device_ip = item.get('ip', '')
                     ports = item.get('ports', [])
+
+                    # 检查 ports 是否为 None
+                    if ports is None:
+                        continue
 
                     for port in ports:
                         if isinstance(port, dict):
@@ -273,6 +285,10 @@ class DBHelper:
                 if item and isinstance(item, dict):
                     device_ip = item.get('ip', '')
                     routes = item.get('routes', [])
+
+                    # 检查 routes 是否为 None
+                    if routes is None:
+                        continue
 
                     for route in routes:
                         if isinstance(route, dict):
@@ -327,6 +343,10 @@ class DBHelper:
                     device_ip = item.get('ip', '')
                     lldp_list = item.get('lldp', [])
 
+                    # 检查 lldp_list 是否为 None
+                    if lldp_list is None:
+                        continue
+
                     for lldp in lldp_list:
                         if isinstance(lldp, dict):
                             values.append((
@@ -374,6 +394,10 @@ class DBHelper:
                     device_ip = item.get('ip', '')
                     gates = item.get('gates', [])
 
+                    # 检查 gates 是否为 None
+                    if gates is None:
+                        continue
+
                     for gate in gates:
                         if isinstance(gate, dict):
                             values.append((
@@ -417,6 +441,10 @@ class DBHelper:
                 if item and isinstance(item, dict):
                     device_ip = item.get('ip', '')
                     gates = item.get('gates_ipv6', [])
+
+                    # 检查 gates 是否为 None
+                    if gates is None:
+                        continue
 
                     for gate in gates:
                         if isinstance(gate, dict):
@@ -463,6 +491,10 @@ class DBHelper:
                 if item and isinstance(item, dict):
                     device_ip = item.get('ip', '')
                     sn_list = item.get('sn_info', [])
+
+                    # 检查 sn_list 是否为 None
+                    if sn_list is None:
+                        continue
 
                     for sn in sn_list:
                         if isinstance(sn, dict):
