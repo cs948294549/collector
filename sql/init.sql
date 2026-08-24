@@ -52,10 +52,12 @@ CREATE TABLE IF NOT EXISTS arps (
     ip VARCHAR(64) COLLATE utf8_bin NOT NULL COMMENT 'ip地址',
     arp_mac VARCHAR(30) COLLATE utf8_bin NOT NULL COMMENT 'arp-mac地址',
     arp_ip VARCHAR(64) COLLATE utf8_bin NOT NULL COMMENT '设备ip地址',
-    port_id INT COLLATE utf8_bin NULL COMMENT '逻辑端口id',
+    port_id INT COLLATE utf8_bin NOT NULL COMMENT '逻辑端口id',
     timestamp VARCHAR(100) COLLATE utf8_bin NULL COMMENT '采集时间',
-    PRIMARY KEY(ip, arp_mac, arp_ip),
+    PRIMARY KEY(ip, port_id, arp_ip),
     INDEX idx_arp_ip (arp_ip),
+    INDEX idx_arp_mac (arp_mac),
+    INDEX idx_ip_portid (ip, port_id),
     INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ARP表';
 
@@ -68,6 +70,7 @@ CREATE TABLE IF NOT EXISTS macs (
     timestamp VARCHAR(100) COLLATE utf8_bin NULL COMMENT '采集时间',
     PRIMARY KEY(ip, vlan_id, mac_address),
     INDEX idx_mac (mac_address),
+    INDEX idx_ip_portid (ip, port_id),
     INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='MAC地址表';
 
@@ -81,8 +84,13 @@ CREATE TABLE IF NOT EXISTS gates (
     endip INT UNSIGNED COLLATE utf8_bin NULL COMMENT '结束ip',
     timestamp VARCHAR(100) COLLATE utf8_bin NULL COMMENT '采集时间',
     PRIMARY KEY(ip, gateway),
+    INDEX idx_startip_endip (startip, endip),
+    INDEX idx_gateway (gateway),
     INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='IPv4网关表';
+
+
+
 
 -- 6. IPv6网关表
 CREATE TABLE IF NOT EXISTS gates_ipv6 (
@@ -92,6 +100,7 @@ CREATE TABLE IF NOT EXISTS gates_ipv6 (
     mask INT COLLATE utf8_bin NULL COMMENT '掩码长度',
     timestamp VARCHAR(100) COLLATE utf8_bin NULL COMMENT '采集时间',
     PRIMARY KEY(ip, gateway),
+    INDEX idx_gateway (gateway),
     INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='IPv6网关表';
 
@@ -106,6 +115,9 @@ CREATE TABLE IF NOT EXISTS lldps (
     loc_portname VARCHAR(300) COLLATE utf8_bin NULL COMMENT '本端端口名称',
     loc_portalias VARCHAR(300) COLLATE utf8_bin NULL COMMENT '本端端口描述',
     PRIMARY KEY(ip, port_id),
+    INDEX idx_rem_name (rem_name(100)),
+    INDEX idx_loc_portname (loc_portname(100)),
+    INDEX idx_ip_locportname (ip, loc_portname(100)),
     INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='LLDP邻居信息表';
 
