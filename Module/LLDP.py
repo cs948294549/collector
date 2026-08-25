@@ -105,6 +105,7 @@ class LLDPInfo(object):
                 key = ".".join(key.split(".")[-2:])
                 if key in oid_cache.keys():
                     oid_cache[key]["rem_name"] = oid_infos[oid].decode("utf-8", "ignore")
+                    oid_cache[key]["rem_name"] = oid_cache[key]["rem_name"].replace(".vdian.net", "")
                 # else:
                 #     oid_cache[key] = {}
                 #     oid_cache[key]["rem_name"] = oid_infos[oid].decode("utf-8", "ignore")
