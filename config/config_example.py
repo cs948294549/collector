@@ -26,3 +26,9 @@ concurrency_config = {
     "max_workers": 50,      # 最大并发数（根据设备数量和网络情况调整）
     "batch_size": 100       # 批次大小
 }
+
+# Zabbix API 配置
+zabbix_config = {
+    "api_url": "http://10.35.112.170:8080/api_jsonrpc.php",
+    "token": "your_zabbix_api_token_here",  # Zabbix Web -> Users -> API tokens 创建，必须修改
+}

@@ -8,7 +8,7 @@ import signal
 import sys
 import yaml
 from pathlib import Path
-from scheduler import TaskScheduler
+from utils.scheduler import TaskScheduler
 from utils.db_queue import get_db_queue
 
 # 配置日志

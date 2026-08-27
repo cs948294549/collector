@@ -8,7 +8,7 @@ set -e
 # 配置变量
 IMAGE_NAME="collector"
 IMAGE_TAG="${1:-v1}"
-DOCKERFILE_PATH="Dockerfile"
+DOCKERFILE_PATH="docker/Dockerfile"
 BUILD_CONTEXT=".."
 
 # 颜色输出
