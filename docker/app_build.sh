@@ -36,7 +36,7 @@ fi
 
 # 检查必要文件
 echo -e "${YELLOW}检查必要文件...${NC}"
-required_files=("requirements.txt" "main.py" "scheduler.py" "config/config.py" "config/task_config.yaml")
+required_files=("requirements.txt" "main.py" "utils/scheduler.py" "config/config.py" "config/task_config.yaml")
 for file in "${required_files[@]}"; do
     if [ ! -f "$file" ]; then
         echo -e "${RED}错误: $file 不存在${NC}"
