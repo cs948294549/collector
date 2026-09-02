@@ -16,7 +16,7 @@ import os
 import re
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import calendar
 
@@ -24,10 +24,9 @@ import calendar
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from config.config import zabbix_config
 
-ZABBIX_API_URL = zabbix_config["api_url"]
-ZABBIX_TOKEN = zabbix_config["api_token"]
+ZABBIX_API_URL = "http://10.35.112.170:8080/api_jsonrpc.php"
+ZABBIX_TOKEN = "9529e553773f5f589746a480ded256415983516730c9c35ac30f101253c7fbbf"
 
 # 匹配 net.if.in[...] / net.if.out[...]，排除 .discards / .errors 等子指标
 TRAFFIC_KEY_RE = re.compile(r'^net\.if\.(in|out)\[')
@@ -197,20 +196,27 @@ def get_item_history(url, headers, hostid, host, item_key, time_from, time_till)
         sys.exit(1)
 
 
-def calculate_95th_percentile(history_data):
-    """计算当前 95 峰值：所有采样点按大小排序，去掉最高 5%，
-    剩余点中的最大值即为 95th percentile 计费值"""
+def calculate_95th_percentile(history_data, total_points_in_month):
+    """计算当前 95 峰值：丢弃点数按当月完整周期的采样点数（total_points_in_month，
+    与 calculate_quota_remaining 用的是同一个值）计算，而不是当前已采集的样本数，
+    否则月末前因样本量不足会导致丢弃点数偏少、95 峰值虚高，无法与月末最终值对齐"""
     values = sorted(float(record["value"]) for record in history_data)
     if not values:
         return None
 
-    drop_count = int(len(values) * 0.05)
+    target_drop_count = int(total_points_in_month * 0.05)
+    # 保护：月初等样本不足场景下，全月口径丢弃数可能超过实际样本数（甚至超过2倍），
+    # Python 负数切片会导致 remaining_values 为空、remaining_values[-1] 抛 IndexError，
+    # 这里把丢弃数压到 len(values)-1，保证至少保留1个点，不崩溃
+    drop_count = min(target_drop_count, len(values) - 1)
     remaining_values = values[:len(values) - drop_count] if drop_count > 0 else values
     return {
         "percentile_95th_value": remaining_values[-1],
         "total_samples": len(values),
         "dropped_top_count": drop_count,
-        "remaining_count": len(remaining_values)
+        "remaining_count": len(remaining_values),
+        # 实际丢弃数被压缩过，说明样本量还远不够全月配额，此时的 95 峰值不可信
+        "insufficient_samples": drop_count < target_drop_count
     }
 
 
@@ -260,6 +266,8 @@ def print_human_report(host, item_name, item_key, threshold, delay_seconds, days
     if percentile_result:
         pv = percentile_result["percentile_95th_value"]
         lines.append(f"  95 峰值:              {pv:,.0f} bps ({pv/1e9:.3f} Gbps)")
+        lines.append(f"  95% 配额(应丢弃点位数): {quota_result['quota_total']} "
+                      f"/ {quota_result['total_points_in_month']} (全月)")
         lines.append(f"  丢弃的最高样本数:     {percentile_result['dropped_top_count']} "
                       f"/ {percentile_result['total_samples']}")
         lines.append("  注意: 该值基于月初至当前时刻的数据，月末最终值可能更高。")
@@ -273,13 +281,13 @@ def main():
     if len(sys.argv) < 2:
         print("用法:")
         print(f"  查询可选监控项 key:   {os.path.basename(sys.argv[0])} <host>")
-        print(f"  计算配额与 95 峰值:   {os.path.basename(sys.argv[0])} <host> <item_key> <threshold_bps>")
+        print(f"  计算配额与 95 峰值:   {os.path.basename(sys.argv[0])} <host> <item_key:port_id> <direction:in/out> <threshold_bps>")
         sys.exit(1)
 
     host = sys.argv[1]
 
     if not ZABBIX_TOKEN:
-        print("ERROR: ZABBIX_API_TOKEN environment variable is not set", file=sys.stderr)
+        print("ERROR: config/config.py 中 zabbix_config['api_token'] 未配置", file=sys.stderr)
         sys.exit(1)
     headers = get_auth_headers(ZABBIX_TOKEN)
 
@@ -288,18 +296,19 @@ def main():
         list_traffic_items(ZABBIX_API_URL, headers, host)
         sys.exit(0)
 
-    if len(sys.argv) < 4:
-        print(f"用法: {os.path.basename(sys.argv[0])} <host> <item_key> <threshold_bps>", file=sys.stderr)
+    if len(sys.argv) < 5:
+        print(f"用法: {os.path.basename(sys.argv[0])} <host> <item_key:port_id> <direction:in/out> <threshold_bps>", file=sys.stderr)
         sys.exit(1)
 
-    item_key = sys.argv[2]
-    threshold = float(sys.argv[3])
+    item_key = "net.if.{}[{}]".format(sys.argv[3],sys.argv[2])
+    threshold = float(sys.argv[4])
 
     now = datetime.now()
     month_start = datetime(now.year, now.month, 1, 0, 0, 0)
     days_in_month = calendar.monthrange(now.year, now.month)[1]
 
     time_from = int(month_start.timestamp())
+    # time_from = int((now - timedelta(days=30)).timestamp())
     time_till = int(now.timestamp())
 
     hostid = get_hostid(ZABBIX_API_URL, headers, host)
@@ -308,25 +317,20 @@ def main():
     )
 
     quota_result = calculate_quota_remaining(history, threshold, delay_seconds, days_in_month)
-    percentile_result = calculate_95th_percentile(history)
+    percentile_result = calculate_95th_percentile(history, quota_result["total_points_in_month"])
 
-    print_human_report(
-        host, item_name, item_key, threshold, delay_seconds, days_in_month,
-        quota_result, percentile_result,
-        month_start.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
-    )
+    # print_human_report(
+    #     host, item_name, item_key, threshold, delay_seconds, days_in_month,
+    #     quota_result, percentile_result,
+    #     month_start.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
+    # )
 
-    # stdout 只输出剩余配额数值，供 Zabbix external check 采集
-    print(quota_result["remaining"])
-
-    try:
-        log_record = dict(quota_result)
-        if percentile_result:
-            log_record["percentile_95th_bps"] = percentile_result["percentile_95th_value"]
-        with open("/tmp/zabbix_95th_quota.log", "a") as f:
-            f.write(f"{now.isoformat()} - {host} - {item_key} - {json.dumps(log_record)}\n")
-    except Exception as e:
-        print(f"WARN: Cannot write log file: {e}", file=sys.stderr)
+    # stdout 输出一份 JSON，供 Zabbix external check 采集；
+    # Zabbix 侧用一个主监控项采集这份 JSON，再用多个依赖项通过 JSONPath 拆出各字段，
+    # 避免同时对接告警和图表时重复调用本脚本（每次调用都会拉取整月历史数据）。
+    output = dict(quota_result)
+    output["percentile_95th_bps"] = percentile_result["percentile_95th_value"] if percentile_result else None
+    print(json.dumps(output))
 
 
 if __name__ == "__main__":

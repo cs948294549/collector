@@ -30,5 +30,5 @@ concurrency_config = {
 # Zabbix API 配置
 zabbix_config = {
     "api_url": "http://10.35.112.170:8080/api_jsonrpc.php",
-    "token": "your_zabbix_api_token_here",  # Zabbix Web -> Users -> API tokens 创建，必须修改
+    "api_token": "your_zabbix_api_token_here",  # Zabbix Web -> Users -> API tokens 创建，必须修改
 }
