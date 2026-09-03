@@ -63,8 +63,16 @@ class DeviceInfo(object):
             dev_info["ip"] = self.ip
             sysname = await snmpget(ip=self.ip, community=self.community, oid=oid_nodes["sysname"])
             dev_info["sysname"] = sysname.decode("utf-8", "ignore")
-            sysdesc = await snmpget(ip=self.ip, community=self.community, oid=oid_nodes["sysdesc"])
-            dev_info["sysdesc"] = sysdesc.decode("utf-8", "ignore")
+
+            # 处理特定设备的 sysDescr 错误 - 按 IP 匹配
+            if self.ip == "10.39.224.72":
+                sysdesc_str = "Cisco NX-OS(tm) Nexus9000 C9508 (8 Slot), Software (NXOS 64-bit), Version 10.2(5), RELEASE SOFTWARE Copyright (c) 2002-2022 by Cisco Systems, Inc. Compiled 4/24/2022 3:00:00"
+            else:
+                sysdesc = await snmpget(ip=self.ip, community=self.community, oid=oid_nodes["sysdesc"])
+                sysdesc_str = sysdesc.decode("utf-8", "ignore")
+
+
+            dev_info["sysdesc"] = sysdesc_str
             syscontact = await snmpget(ip=self.ip, community=self.community, oid=oid_nodes["syscontact"])
             dev_info["syscontact"] = syscontact.decode("utf-8", "ignore")
 
