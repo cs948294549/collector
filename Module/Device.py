@@ -2,6 +2,35 @@ from utils.snmp_tool import snmpwalk, snmpget
 import re
 import time
 
+# 厂商标识符映射，用于自动识别厂商
+VENDOR_IDENTIFIERS = {
+    'cisco_xr': ['ios xr'],
+    'cisco_ios': ['ios'],
+    'cisco_nx': ['nx-os', 'nxos', 'cisco', 'catos'],
+    'huawei': ['huawei', 'vrp', 'quidway', 'huarong', 'futurematrix'],
+    'h3c': ['h3c', '3com', 'hp'],
+    'juniper': ['juniper', 'junos'],
+    'arista': ['arista', 'eos']
+}
+
+def identify_device_vendor(sys_descr: str) -> str:
+    """
+    根据系统描述自动识别设备厂商
+
+    Args:
+        sys_descr: 系统描述字符串
+
+    Returns:
+        str: 识别出的厂商名称，默认为'unknown'
+    """
+    sys_descr_lower = sys_descr.lower() if sys_descr else ''
+
+    for vendor, identifiers in VENDOR_IDENTIFIERS.items():
+        for identifier in identifiers:
+            if identifier.lower() in sys_descr_lower:
+                return vendor
+
+    return 'unknown'
 
 def GetDeviceType(sysdesc):
     check_desc = sysdesc.upper()
@@ -73,6 +102,8 @@ class DeviceInfo(object):
 
 
             dev_info["sysdesc"] = sysdesc_str
+            dev_info["vendor"] = identify_device_vendor(sysdesc_str)
+
             syscontact = await snmpget(ip=self.ip, community=self.community, oid=oid_nodes["syscontact"])
             dev_info["syscontact"] = syscontact.decode("utf-8", "ignore")
 

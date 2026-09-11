@@ -73,8 +73,8 @@ class DBHelper:
         try:
             sql = """
                 INSERT INTO devices (ip, sysname, sysdesc, syscontact, uptime,
-                                   hardware, features, version, sys_type, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   hardware, features, version, sys_type, vendor, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     sysname = VALUES(sysname),
                     sysdesc = VALUES(sysdesc),
@@ -84,6 +84,7 @@ class DBHelper:
                     features = VALUES(features),
                     version = VALUES(version),
                     sys_type = VALUES(sys_type),
+                    vendor = VALUES(vendor),
                     timestamp = VALUES(timestamp)
             """
 
@@ -100,6 +101,7 @@ class DBHelper:
                         device.get('features', ''),
                         device.get('version', ''),
                         device.get('sys_type', 'default'),
+                        device.get('vendor', 'unknown'),
                         device.get('timestamp', '')
                     ))
 

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS devices (
     features VARCHAR(100) COLLATE utf8_bin NULL COMMENT '版本',
     version VARCHAR(100) COLLATE utf8_bin NULL COMMENT '软件版本',
     sys_type VARCHAR(50) COLLATE utf8_bin NULL COMMENT '设备类型',
+    vendor VARCHAR(50) COLLATE utf8_bin NULL COMMENT '设备厂商',
     timestamp VARCHAR(100) COLLATE utf8_bin NULL COMMENT '采集时间',
     PRIMARY KEY(ip)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='设备基础信息表';
