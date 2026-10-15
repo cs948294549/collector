@@ -3,8 +3,8 @@
 """
 多接口合并计算当前自然月的 95 峰值剩余配额。
 
-流量口径：同一接口先把 in/out 按时间点取最大值，再将多台设备的带宽曲线求和，
-基于合并后的总带宽曲线计算 95 峰值和超限次数。
+流量口径：先把多台设备同方向的流量按时间点求和，再对合并后的 in/out 取最大值，
+基于这条总带宽曲线计算 95 峰值和超限次数。
 
 用法:
   查询某主机可用的流量监控项 key:
@@ -233,35 +233,41 @@ def get_item_history(url, headers, item_id, value_type, time_from, time_till):
         sys.exit(1)
 
 
-def merge_direction_samples(history_in, history_out, delay_seconds):
-    """把 in / out 两个方向的采样按时间点合并为一条曲线:同一时刻取两者最大值。
-    某个时刻只有一个方向有采样时,该时刻取该方向的值(相当于另一方向为 0)。
-    返回按时间升序的 [(clock, value), ...]
+def bucket_samples(history, delay_seconds):
+    """把单个监控项的历史采样按采集间隔归入时间桶，返回 {bucket: value}。
 
-    合并的键按采集间隔取整(clock // delay * delay),而不是直接用 clock:
-    两个方向是各自独立的 item,轮询落库时间会差 1~2 秒(一个 :20、一个 :21),
-    直接按 clock 精确匹配会让这些点各占一个时间点,把样本数虚增约 5%。
-    而配额上限(X)和丢弃点数都按样本数计算,样本数虚增会直接让结果算错。
-    取整到采集间隔后,同一轮询周期的两个方向会落进同一个桶。"""
+    取桶而不直接用 clock：同一轮询周期的采样落库时间会差 1~2 秒（一个 :20、一个 :21），
+    直接按 clock 精确匹配会让这些点各占一个时间点，把样本数虚增约 5%。
+    而配额上限和丢弃点数都按样本数计算，样本数虚增会直接让结果算错。
+    同一桶内出现多条记录时取最大值。"""
+    bucketed = {}
+    for record in history:
+        bucket = int(record["clock"]) // delay_seconds * delay_seconds
+        value = float(record["value"])
+        if bucket not in bucketed or value > bucketed[bucket]:
+            bucketed[bucket] = value
+    return bucketed
+
+
+def sum_across_interfaces(per_interface_bucketed):
+    """把多台设备同一方向的数据按时间桶求和，得到该方向的总带宽曲线 {bucket: value}。
+    某台设备在某桶缺采样时按 0 计（相当于该设备此刻该方向无流量）。"""
+    summed = {}
+    for bucketed in per_interface_bucketed:
+        for bucket, value in bucketed.items():
+            summed[bucket] = summed.get(bucket, 0) + value
+    return summed
+
+
+def merge_direction_totals(in_totals, out_totals):
+    """把已经求和过的 in / out 两条总曲线按时间桶取最大值，再按时间升序展开成
+    [(bucket, value), ...]。某个桶只有一个方向有数据时，该桶取该方向的值。"""
     merged = {}
-    for history in (history_in, history_out):
-        for record in history:
-            bucket = int(record["clock"]) // delay_seconds * delay_seconds
-            value = float(record["value"])
+    for totals in (in_totals, out_totals):
+        for bucket, value in totals.items():
             if bucket not in merged or value > merged[bucket]:
                 merged[bucket] = value
     return sorted(merged.items())
-
-
-def sum_multi_interface_samples(per_interface_samples):
-    """将多台设备的带宽曲线按时间点求和，返回合并后的总带宽曲线。
-    每条曲线已由 merge_direction_samples 按采集间隔对齐，直接按 clock 求和即可；
-    某台设备在某时间点缺采样时按 0 计（相当于该设备此刻无流量）。"""
-    summed = {}
-    for samples in per_interface_samples:
-        for clock, value in samples:
-            summed[clock] = summed.get(clock, 0) + value
-    return sorted(summed.items())
 
 
 def summarize_quota(values, thresholds_bps, delay_seconds, days_in_month):
@@ -382,8 +388,9 @@ def main():
     time_from = int(month_start.timestamp())
     time_till = int(now.timestamp())
 
-    # 拉取每个接口的历史数据，in/out 合并后得到该接口的带宽曲线
-    per_interface_samples = []
+    # 拉取每个接口的历史数据，按方向分别归桶
+    in_per_interface = []
+    out_per_interface = []
     delay_seconds = None
     for iface in interfaces:
         host = iface["host"]
@@ -406,11 +413,13 @@ def main():
             ZABBIX_API_URL, headers, item_infos["out"]["itemid"],
             item_infos["out"]["value_type"], time_from, time_till
         )
-        merged = merge_direction_samples(history_in, history_out, delay_seconds)
-        per_interface_samples.append(merged)
+        in_per_interface.append(bucket_samples(history_in, delay_seconds))
+        out_per_interface.append(bucket_samples(history_out, delay_seconds))
 
-    # 多接口按时间点求和，得到总带宽曲线
-    combined_samples = sum_multi_interface_samples(per_interface_samples)
+    # 先按方向把多台设备求和，再对合并后的 in / out 取最大值
+    in_totals = sum_across_interfaces(in_per_interface)
+    out_totals = sum_across_interfaces(out_per_interface)
+    combined_samples = merge_direction_totals(in_totals, out_totals)
     combined_values = [v for _, v in combined_samples]
 
     # 只排序一次，同时算出 95 峰值和各阈值梯度的剩余配额点数
