@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-计算当前自然月的 95 峰值剩余配额，并计算截至目前的 95 峰值。
+多接口合并计算当前自然月的 95 峰值剩余配额。
 
-流量口径:按端口统计,不区分方向。先把同一时刻的 in / out 两个方向取最大值,
-得到该端口在该时刻的实际带宽占用,再基于这条合并后的曲线计算 95 峰值和超限次数。
+流量口径：同一接口先把 in/out 按时间点取最大值，再将多台设备的带宽曲线求和，
+基于合并后的总带宽曲线计算 95 峰值和超限次数。
 
 用法:
-  仅查询该主机可用的流量监控项 key:
+  查询某主机可用的流量监控项 key:
     zabbix_check_monthly_95th_quota.py <host>
 
-  计算配额与 95 峰值:
-    zabbix_check_monthly_95th_quota.py <host> <port_id> <threshold_bps>
+  计算多接口合并配额与 95 峰值（组名见脚本内 INTERFACE_PAIRS）:
+    zabbix_check_monthly_95th_quota.py <group_name>
+
+/usr/lib/zabbix/externalscripts/zabbix_check_monthly_95th_quota.py
 """
 
 import sys
@@ -33,6 +35,32 @@ ZABBIX_TOKEN = "9529e553773f5f589746a480ded256415983516730c9c35ac30f101253c7fbbf
 
 # 匹配 net.if.in[...] / net.if.out[...]，排除 .discards / .errors 等子指标
 TRAFFIC_KEY_RE = re.compile(r'^net\.if\.(in|out)\[')
+
+# 多接口合并配置：key 为组名，每组含接口列表和阈值梯度（Mbps）
+# 运行时传入组名即可，如: python3 zabbix_check_monthly_95th_quota.py dc07
+INTERFACE_PAIRS = {
+    "dc07": {
+        "interfaces": [
+            {"host": "pcs1_dc07_m01.vdian.net", "port_id": "436231168"},
+            {"host": "pcs2_dc07_m01.vdian.net", "port_id": "436231168"},
+        ],
+        "thresholds_mbps": [600, 700, 800, 900, 1000],
+    },
+    "dc09": {
+        "interfaces": [
+            {"host": "pcs1_dc09_m01", "port_id": "436231168"},
+            {"host": "pcs2_dc09_m01", "port_id": "436231168"},
+        ],
+        "thresholds_mbps": [100, 200, 300],
+    },
+    "dc03": {
+        "interfaces": [
+            {"host": "pcs1_dc03_m02", "port_id": "436231168"},
+            {"host": "pcs2_dc03_m02", "port_id": "436231168"},
+        ],
+        "thresholds_mbps": [20, 40, 80],
+    },
+}
 
 
 def parse_delay_to_seconds(delay_str):
@@ -123,8 +151,9 @@ def list_traffic_items(url, headers, host):
         lines.append("  (未找到匹配 net.if.in[...] / net.if.out[...] 的监控项，"
                       "该主机可能未启用接口流量采集模板)")
     lines.append("")
-    lines.append("用法: 从上面任意一行 key 里取出方括号中的端口 ID（如 net.if.in[436231168] 的 436231168），再执行：")
-    lines.append(f"  python3 {os.path.basename(sys.argv[0])} {host} <port_id> <threshold_bps>")
+    lines.append("用法: 从上面任意一行 key 里取出方括号中的端口 ID（如 net.if.in[436231168] 的 436231168），"
+                 "填入脚本里的 INTERFACE_PAIRS 配置，再执行：")
+    lines.append(f"  python3 {os.path.basename(sys.argv[0])} <group_name>")
 
     print("\n".join(lines))
 
@@ -224,50 +253,66 @@ def merge_direction_samples(history_in, history_out, delay_seconds):
     return sorted(merged.items())
 
 
-def calculate_95th_percentile(values, total_points_in_month):
-    """计算当前 95 峰值。values 为按时间点取 in/out 最大值后的曲线。
-    丢弃点数按当月完整周期的采样点数（total_points_in_month，
-    与 calculate_quota_remaining 用的是同一个值）计算，而不是当前已采集的样本数，
-    否则月末前因样本量不足会导致丢弃点数偏少、95 峰值虚高，无法与月末最终值对齐"""
-    values = sorted(values)
-    if not values:
-        return None
-
-    target_drop_count = int(total_points_in_month * 0.05)
-    # 保护：月初等样本不足场景下，全月口径丢弃数可能超过实际样本数（甚至超过2倍），
-    # Python 负数切片会导致 remaining_values 为空、remaining_values[-1] 抛 IndexError，
-    # 这里把丢弃数压到 len(values)-1，保证至少保留1个点，不崩溃
-    drop_count = min(target_drop_count, len(values) - 1)
-    remaining_values = values[:len(values) - drop_count] if drop_count > 0 else values
-    return {
-        "percentile_95th_value": remaining_values[-1],
-        "total_samples": len(values),
-        "dropped_top_count": drop_count,
-        "remaining_count": len(remaining_values),
-        # 实际丢弃数被压缩过，说明样本量还远不够全月配额，此时的 95 峰值不可信
-        "insufficient_samples": drop_count < target_drop_count
-    }
+def sum_multi_interface_samples(per_interface_samples):
+    """将多台设备的带宽曲线按时间点求和，返回合并后的总带宽曲线。
+    每条曲线已由 merge_direction_samples 按采集间隔对齐，直接按 clock 求和即可；
+    某台设备在某时间点缺采样时按 0 计（相当于该设备此刻无流量）。"""
+    summed = {}
+    for samples in per_interface_samples:
+        for clock, value in samples:
+            summed[clock] = summed.get(clock, 0) + value
+    return sorted(summed.items())
 
 
-def calculate_quota_remaining(values, threshold, delay_seconds, days_in_month):
-    """计算剩余配额 M = quota_total - X
+def summarize_quota(values, thresholds_bps, delay_seconds, days_in_month):
+    """对合并后的总带宽曲线只排序一次，同时算出 95 峰值和各阈值梯度的超限次数。
+
     quota_total 按当月实际天数和采集间隔动态计算：
     quota_total = (days_in_month * 86400 / delay_seconds) * 5%
-    over_count 统计的是合并后的曲线（按时间点取 in/out 最大值）中超过阈值的次数
-    """
-    over_count = sum(1 for value in values if value > threshold)
 
+    各阈值的超限次数在同一个有序数组上按阈值降序推进下标一次扫完，阈值再多也只排一次序。
+
+    95 峰值的丢弃点数按当月完整周期的采样点数计算，而不是当前已采集的样本数，
+    否则月末前因样本量不足会导致丢弃点数偏少、95 峰值虚高，无法与月末最终值对齐。
+    """
     total_points_in_month = int(days_in_month * 86400 / delay_seconds)
     quota_total = int(total_points_in_month * 0.05)
-    remaining = quota_total - over_count
-    return {
-        "remaining": remaining,
-        "over_count": over_count,
-        "total_samples": len(values),
-        "quota_total": quota_total,
+
+    result = {
         "total_points_in_month": total_points_in_month,
-        "usage_percent": round((over_count / quota_total) * 100, 2) if quota_total else 0
+        "quota_total": quota_total,
+        "total_samples": len(values),
+        "percentile_95th_bps": None,
     }
+
+    if not values:
+        for threshold_bps in thresholds_bps:
+            label = int(threshold_bps // 1_000_000)
+            result[f"over_count_{label}"] = 0
+            result[f"remaining_{label}"] = quota_total
+        return result
+
+    ordered_desc = sorted(values, reverse=True)
+
+    # 保护：月初等样本不足场景下，全月口径丢弃数可能超过实际样本数（甚至超过2倍），
+    # 负数索引会越界，这里把丢弃数压到 len-1，保证至少保留1个点
+    target_drop_count = quota_total
+    drop_count = min(target_drop_count, len(ordered_desc) - 1)
+    # 降序数组里下标 D 处的元素，就是升序数组里丢弃掉最大的 D 个之后的第一个值
+    result["percentile_95th_bps"] = ordered_desc[drop_count]
+
+    # 降序数组里「> 阈值」的元素构成一个前缀。阈值从大到小处理，
+    # 前缀只会变长，下标单调右移，整个循环下来每个元素最多被扫一次
+    idx = 0
+    for threshold_bps in sorted(thresholds_bps, reverse=True):
+        while idx < len(ordered_desc) and ordered_desc[idx] > threshold_bps:
+            idx += 1
+        label = int(threshold_bps // 1_000_000)
+        result[f"over_count_{label}"] = idx
+        # 超限点数超过当月配额时余量归零，不再显示负数
+        result[f"remaining_{label}"] = max(0, quota_total - idx)
+
+    return result
 
 
 def print_human_report(host, port_id, threshold, delay_seconds, days_in_month,
@@ -310,77 +355,72 @@ def main():
     if len(sys.argv) < 2:
         print("用法:")
         print(f"  查询可选监控项 key:   {os.path.basename(sys.argv[0])} <host>")
-        print(f"  计算配额与 95 峰值:   {os.path.basename(sys.argv[0])} <host> <port_id> <threshold_bps>")
+        print(f"  计算多接口合并配额:   {os.path.basename(sys.argv[0])} <group_name>")
+        print(f"  可用组名: {list(INTERFACE_PAIRS.keys())}")
         sys.exit(1)
 
-    host = sys.argv[1]
-
     if not ZABBIX_TOKEN:
-        print("ERROR: config/config.py 中 zabbix_config['api_token'] 未配置", file=sys.stderr)
+        print("ERROR: ZABBIX_TOKEN 未配置", file=sys.stderr)
         sys.exit(1)
     headers = get_auth_headers(ZABBIX_TOKEN)
 
-    # 只提供了 host：列出可选的监控项 key，不做计算
-    if len(sys.argv) == 2:
-        list_traffic_items(ZABBIX_API_URL, headers, host)
+    arg = sys.argv[1]
+
+    # 单独传 host 时，列出该主机可用监控项 key
+    if arg not in INTERFACE_PAIRS:
+        list_traffic_items(ZABBIX_API_URL, headers, arg)
         sys.exit(0)
 
-    if len(sys.argv) < 4:
-        print(f"用法: {os.path.basename(sys.argv[0])} <host> <port_id> <threshold_bps>", file=sys.stderr)
-        sys.exit(1)
-
-    port_id = sys.argv[2]
-    threshold = float(sys.argv[3])
+    group_name = arg
+    group_cfg = INTERFACE_PAIRS[group_name]
+    interfaces = group_cfg["interfaces"]
+    thresholds_bps = [t * 1_000_000 for t in group_cfg["thresholds_mbps"]]
 
     now = datetime.now()
     month_start = datetime(now.year, now.month, 1, 0, 0, 0)
     days_in_month = calendar.monthrange(now.year, now.month)[1]
-
     time_from = int(month_start.timestamp())
-    # time_from = int((now - timedelta(days=30)).timestamp())
     time_till = int(now.timestamp())
 
-    hostid = get_hostid(ZABBIX_API_URL, headers, host)
+    # 拉取每个接口的历史数据，in/out 合并后得到该接口的带宽曲线
+    per_interface_samples = []
+    delay_seconds = None
+    for iface in interfaces:
+        host = iface["host"]
+        port_id = iface["port_id"]
+        hostid = get_hostid(ZABBIX_API_URL, headers, host)
 
-    # 分别取 in / out 的历史数据，再按时间点合并（取最大值），得到该端口的实际带宽曲线
-    item_infos = {}
-    for direction in ("in", "out"):
-        key = "net.if.{}[{}]".format(direction, port_id)
-        item_infos[direction] = get_item_info(ZABBIX_API_URL, headers, hostid, host, key)
+        item_infos = {}
+        for direction in ("in", "out"):
+            key = f"net.if.{direction}[{port_id}]"
+            item_infos[direction] = get_item_info(ZABBIX_API_URL, headers, hostid, host, key)
 
-    history_in = get_item_history(
-        ZABBIX_API_URL, headers, item_infos["in"]["itemid"],
-        item_infos["in"]["value_type"], time_from, time_till
-    )
-    history_out = get_item_history(
-        ZABBIX_API_URL, headers, item_infos["out"]["itemid"],
-        item_infos["out"]["value_type"], time_from, time_till
-    )
+        if delay_seconds is None:
+            delay_seconds = item_infos["in"]["delay_seconds"]
 
-    delay_seconds = item_infos["in"]["delay_seconds"]
-    merged_samples = merge_direction_samples(history_in, history_out, delay_seconds)
-    merged_values = [value for _, value in merged_samples]
+        history_in = get_item_history(
+            ZABBIX_API_URL, headers, item_infos["in"]["itemid"],
+            item_infos["in"]["value_type"], time_from, time_till
+        )
+        history_out = get_item_history(
+            ZABBIX_API_URL, headers, item_infos["out"]["itemid"],
+            item_infos["out"]["value_type"], time_from, time_till
+        )
+        merged = merge_direction_samples(history_in, history_out, delay_seconds)
+        per_interface_samples.append(merged)
 
-    quota_result = calculate_quota_remaining(merged_values, threshold, delay_seconds, days_in_month)
-    percentile_result = calculate_95th_percentile(merged_values, quota_result["total_points_in_month"])
+    # 多接口按时间点求和，得到总带宽曲线
+    combined_samples = sum_multi_interface_samples(per_interface_samples)
+    combined_values = [v for _, v in combined_samples]
 
-    # print_human_report(
-    #     host, port_id, threshold, delay_seconds, days_in_month,
-    #     quota_result, percentile_result,
-    #     month_start.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
-    # )
+    # 只排序一次，同时算出 95 峰值和各阈值梯度的剩余配额点数
+    output = summarize_quota(combined_values, thresholds_bps, delay_seconds, days_in_month)
+    # 合并后数组的最后一个点，即当前时刻的合并带宽值
+    output["current_bps"] = combined_samples[-1][1] if combined_samples else None
 
-    # stdout 输出一份 JSON，供 Zabbix external check 采集；
-    # Zabbix 侧用一个主监控项采集这份 JSON，再用多个依赖项通过 JSONPath 拆出各字段，
-    # 避免同时对接告警和图表时重复调用本脚本（每次调用都会拉取整月历史数据）。
-    output = dict(quota_result)
-    output["percentile_95th_bps"] = percentile_result["percentile_95th_value"] if percentile_result else None
     print(json.dumps(output))
-
 
 
 if __name__ == "__main__":
     main()
 
-    #pcs1_dc07_m01.vdian.net 436231168 600000000
-    #pcs2_dc07_m01.vdian.net 436231168 600000000
