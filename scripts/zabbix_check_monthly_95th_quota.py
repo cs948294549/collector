@@ -3,12 +3,15 @@
 """
 计算当前自然月的 95 峰值剩余配额，并计算截至目前的 95 峰值。
 
+流量口径:按端口统计,不区分方向。先把同一时刻的 in / out 两个方向取最大值,
+得到该端口在该时刻的实际带宽占用,再基于这条合并后的曲线计算 95 峰值和超限次数。
+
 用法:
   仅查询该主机可用的流量监控项 key:
     zabbix_check_monthly_95th_quota.py <host>
 
   计算配额与 95 峰值:
-    zabbix_check_monthly_95th_quota.py <host> <item_key> <threshold_bps>
+    zabbix_check_monthly_95th_quota.py <host> <port_id> <threshold_bps>
 """
 
 import sys
@@ -120,14 +123,14 @@ def list_traffic_items(url, headers, host):
         lines.append("  (未找到匹配 net.if.in[...] / net.if.out[...] 的监控项，"
                       "该主机可能未启用接口流量采集模板)")
     lines.append("")
-    lines.append("用法: 复制上面某一行的 key 值，再执行：")
-    lines.append(f"  python3 {os.path.basename(sys.argv[0])} {host} <key> <threshold_bps>")
+    lines.append("用法: 从上面任意一行 key 里取出方括号中的端口 ID（如 net.if.in[436231168] 的 436231168），再执行：")
+    lines.append(f"  python3 {os.path.basename(sys.argv[0])} {host} <port_id> <threshold_bps>")
 
     print("\n".join(lines))
 
 
-def get_item_history(url, headers, hostid, host, item_key, time_from, time_till):
-    """获取监控项历史数据，返回 (history_data, delay_seconds, item_name)"""
+def get_item_info(url, headers, hostid, host, item_key):
+    """查询监控项的 itemid / value_type / delay / name"""
     payload = {
         "jsonrpc": "2.0",
         "method": "item.get",
@@ -149,24 +152,30 @@ def get_item_history(url, headers, hostid, host, item_key, time_from, time_till)
 
         if "result" not in result or len(result["result"]) == 0:
             print(f"ERROR: Item with key '{item_key}' not found for host '{host}'", file=sys.stderr)
-            print("提示: 不带 item_key 参数重新运行本脚本，可列出该主机所有可用的流量监控项 key。",
+            print("提示: 不带参数重新运行本脚本，可列出该主机所有可用的流量监控项 key。",
                   file=sys.stderr)
             sys.exit(1)
 
         item_info = result["result"][0]
-        itemid = item_info["itemid"]
-        value_type = int(item_info.get("value_type", 3))
-        delay_seconds = parse_delay_to_seconds(item_info.get("delay", "60"))
+        return {
+            "itemid": item_info["itemid"],
+            "value_type": int(item_info.get("value_type", 3)),
+            "delay_seconds": parse_delay_to_seconds(item_info.get("delay", "60")),
+            "name": item_info.get("name", "N/A"),
+        }
     except Exception as e:
         print(f"ERROR: Cannot get item ID: {e}", file=sys.stderr)
         sys.exit(1)
 
+
+def get_item_history(url, headers, item_id, value_type, time_from, time_till):
+    """获取监控项历史数据，返回 [{clock, value}, ...]（按时间升序）"""
     # value_type: 0=float, 1=character, 2=log, 3=unsigned, 4=text
     payload = {
         "jsonrpc": "2.0",
         "method": "history.get",
         "params": {
-            "itemids": itemid,
+            "itemids": item_id,
             "time_from": time_from,
             "time_till": time_till,
             "output": "extend",
@@ -189,18 +198,38 @@ def get_item_history(url, headers, hostid, host, item_key, time_from, time_till)
             print(f"ERROR: Unexpected history response: {result}", file=sys.stderr)
             sys.exit(1)
 
-        history_data = result["result"]
-        return history_data, delay_seconds, item_info.get("name", "N/A")
+        return result["result"]
     except Exception as e:
         print(f"ERROR: Cannot get history data: {e}", file=sys.stderr)
         sys.exit(1)
 
 
-def calculate_95th_percentile(history_data, total_points_in_month):
-    """计算当前 95 峰值：丢弃点数按当月完整周期的采样点数（total_points_in_month，
+def merge_direction_samples(history_in, history_out, delay_seconds):
+    """把 in / out 两个方向的采样按时间点合并为一条曲线:同一时刻取两者最大值。
+    某个时刻只有一个方向有采样时,该时刻取该方向的值(相当于另一方向为 0)。
+    返回按时间升序的 [(clock, value), ...]
+
+    合并的键按采集间隔取整(clock // delay * delay),而不是直接用 clock:
+    两个方向是各自独立的 item,轮询落库时间会差 1~2 秒(一个 :20、一个 :21),
+    直接按 clock 精确匹配会让这些点各占一个时间点,把样本数虚增约 5%。
+    而配额上限(X)和丢弃点数都按样本数计算,样本数虚增会直接让结果算错。
+    取整到采集间隔后,同一轮询周期的两个方向会落进同一个桶。"""
+    merged = {}
+    for history in (history_in, history_out):
+        for record in history:
+            bucket = int(record["clock"]) // delay_seconds * delay_seconds
+            value = float(record["value"])
+            if bucket not in merged or value > merged[bucket]:
+                merged[bucket] = value
+    return sorted(merged.items())
+
+
+def calculate_95th_percentile(values, total_points_in_month):
+    """计算当前 95 峰值。values 为按时间点取 in/out 最大值后的曲线。
+    丢弃点数按当月完整周期的采样点数（total_points_in_month，
     与 calculate_quota_remaining 用的是同一个值）计算，而不是当前已采集的样本数，
     否则月末前因样本量不足会导致丢弃点数偏少、95 峰值虚高，无法与月末最终值对齐"""
-    values = sorted(float(record["value"]) for record in history_data)
+    values = sorted(values)
     if not values:
         return None
 
@@ -220,12 +249,13 @@ def calculate_95th_percentile(history_data, total_points_in_month):
     }
 
 
-def calculate_quota_remaining(history_data, threshold, delay_seconds, days_in_month):
+def calculate_quota_remaining(values, threshold, delay_seconds, days_in_month):
     """计算剩余配额 M = quota_total - X
     quota_total 按当月实际天数和采集间隔动态计算：
     quota_total = (days_in_month * 86400 / delay_seconds) * 5%
+    over_count 统计的是合并后的曲线（按时间点取 in/out 最大值）中超过阈值的次数
     """
-    over_count = sum(1 for record in history_data if float(record["value"]) > threshold)
+    over_count = sum(1 for value in values if value > threshold)
 
     total_points_in_month = int(days_in_month * 86400 / delay_seconds)
     quota_total = int(total_points_in_month * 0.05)
@@ -233,22 +263,21 @@ def calculate_quota_remaining(history_data, threshold, delay_seconds, days_in_mo
     return {
         "remaining": remaining,
         "over_count": over_count,
-        "total_samples": len(history_data),
+        "total_samples": len(values),
         "quota_total": quota_total,
         "total_points_in_month": total_points_in_month,
         "usage_percent": round((over_count / quota_total) * 100, 2) if quota_total else 0
     }
 
 
-def print_human_report(host, item_name, item_key, threshold, delay_seconds, days_in_month,
+def print_human_report(host, port_id, threshold, delay_seconds, days_in_month,
                         quota_result, percentile_result, query_from, query_till):
     """将本次运行的关键信息整理成一份人可读的文本报告，输出到 stderr
     （stdout 只保留最终数值，供 Zabbix external check 直接采集）"""
     lines = []
     lines.append("=" * 70)
     lines.append(f"主机:           {host}")
-    lines.append(f"监控项:         {item_name}")
-    lines.append(f"监控项 key:     {item_key}")
+    lines.append(f"端口 ID:        {port_id} (in/out 按时间点取最大值合并统计)")
     lines.append(f"统计区间:       {query_from} ~ {query_till} (自然月至今)")
     lines.append(f"采集间隔:       {delay_seconds}s")
     lines.append(f"当月天数:       {days_in_month}")
@@ -281,7 +310,7 @@ def main():
     if len(sys.argv) < 2:
         print("用法:")
         print(f"  查询可选监控项 key:   {os.path.basename(sys.argv[0])} <host>")
-        print(f"  计算配额与 95 峰值:   {os.path.basename(sys.argv[0])} <host> <item_key:port_id> <direction:in/out> <threshold_bps>")
+        print(f"  计算配额与 95 峰值:   {os.path.basename(sys.argv[0])} <host> <port_id> <threshold_bps>")
         sys.exit(1)
 
     host = sys.argv[1]
@@ -296,12 +325,12 @@ def main():
         list_traffic_items(ZABBIX_API_URL, headers, host)
         sys.exit(0)
 
-    if len(sys.argv) < 5:
-        print(f"用法: {os.path.basename(sys.argv[0])} <host> <item_key:port_id> <direction:in/out> <threshold_bps>", file=sys.stderr)
+    if len(sys.argv) < 4:
+        print(f"用法: {os.path.basename(sys.argv[0])} <host> <port_id> <threshold_bps>", file=sys.stderr)
         sys.exit(1)
 
-    item_key = "net.if.{}[{}]".format(sys.argv[3],sys.argv[2])
-    threshold = float(sys.argv[4])
+    port_id = sys.argv[2]
+    threshold = float(sys.argv[3])
 
     now = datetime.now()
     month_start = datetime(now.year, now.month, 1, 0, 0, 0)
@@ -312,15 +341,31 @@ def main():
     time_till = int(now.timestamp())
 
     hostid = get_hostid(ZABBIX_API_URL, headers, host)
-    history, delay_seconds, item_name = get_item_history(
-        ZABBIX_API_URL, headers, hostid, host, item_key, time_from, time_till
+
+    # 分别取 in / out 的历史数据，再按时间点合并（取最大值），得到该端口的实际带宽曲线
+    item_infos = {}
+    for direction in ("in", "out"):
+        key = "net.if.{}[{}]".format(direction, port_id)
+        item_infos[direction] = get_item_info(ZABBIX_API_URL, headers, hostid, host, key)
+
+    history_in = get_item_history(
+        ZABBIX_API_URL, headers, item_infos["in"]["itemid"],
+        item_infos["in"]["value_type"], time_from, time_till
+    )
+    history_out = get_item_history(
+        ZABBIX_API_URL, headers, item_infos["out"]["itemid"],
+        item_infos["out"]["value_type"], time_from, time_till
     )
 
-    quota_result = calculate_quota_remaining(history, threshold, delay_seconds, days_in_month)
-    percentile_result = calculate_95th_percentile(history, quota_result["total_points_in_month"])
+    delay_seconds = item_infos["in"]["delay_seconds"]
+    merged_samples = merge_direction_samples(history_in, history_out, delay_seconds)
+    merged_values = [value for _, value in merged_samples]
+
+    quota_result = calculate_quota_remaining(merged_values, threshold, delay_seconds, days_in_month)
+    percentile_result = calculate_95th_percentile(merged_values, quota_result["total_points_in_month"])
 
     # print_human_report(
-    #     host, item_name, item_key, threshold, delay_seconds, days_in_month,
+    #     host, port_id, threshold, delay_seconds, days_in_month,
     #     quota_result, percentile_result,
     #     month_start.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
     # )
@@ -333,10 +378,9 @@ def main():
     print(json.dumps(output))
 
 
+
 if __name__ == "__main__":
     main()
 
-    #pcs1_dc07_m01.vdian.net "net.if.in[436231168]" 600000000
-    #pcs1_dc07_m01.vdian.net "net.if.out[436231168]" 600000000
-    #pcs2_dc07_m01.vdian.net  "net.if.in[436231168]" 600000000
-    #pcs2_dc07_m01.vdian.net  "net.if.out[436231168]" 600000000
+    #pcs1_dc07_m01.vdian.net 436231168 600000000
+    #pcs2_dc07_m01.vdian.net 436231168 600000000

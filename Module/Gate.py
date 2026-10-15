@@ -338,7 +338,7 @@ if __name__ == '__main__':
     t = time.time()
 
     async def test():
-        a = Gate("10.80.173.232", "Mrtg.Netease", "arista")
+        a = Gate("172.19.2.7", "vdiannet", "foti")
         res = await a.getGates()
         for i in res:
             print(i)
