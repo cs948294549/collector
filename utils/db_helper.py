@@ -561,6 +561,138 @@ class DBHelper:
             self.conn.rollback()
             return 0
 
+    def get_wifi_ac_list(self):
+        """
+        获取 Wi-Fi AC 列表
+
+        Returns:
+            AC 列表（community 为明文）
+        """
+        try:
+            sql = """
+                SELECT ac_id, ac_name, vendor, mgmt_ip, model, community, last_status
+                FROM wifi_ac
+            """
+            self.cursor.execute(sql)
+            results = self.cursor.fetchall()
+            return results if results else []
+
+        except Exception as e:
+            logger.error(f"获取AC列表失败: {e}")
+            return []
+
+    def update_wifi_ac_status(self, ac_id, status):
+        """
+        更新 AC 采集状态
+
+        Args:
+            ac_id: AC ID
+            status: online / offline
+        """
+        try:
+            sql = "UPDATE wifi_ac SET last_status = %s WHERE ac_id = %s"
+            self.cursor.execute(sql, (status, ac_id))
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"更新AC状态失败: {e}")
+            self.conn.rollback()
+
+    def replace_wifi_snapshot(self, ac_id, aps, radios, ssids, clients):
+        """
+        按 AC 原子替换 Wi-Fi 快照（AP / 射频 / SSID / 终端）
+
+        单事务内先删该 AC 旧数据再写入新数据，展示侧不会读到半截快照；
+        AP 换 AC、终端漫游到其他 AC 时主键冲突，按 ON DUPLICATE KEY UPDATE 改归属
+
+        Args:
+            ac_id: AC ID
+            aps / radios / ssids / clients: Module 采集结果列表
+
+        Returns:
+            成功 True，失败 False
+        """
+        try:
+            for table in ["wifi_client", "wifi_ssid", "wifi_radio", "wifi_ap"]:
+                self.cursor.execute(f"DELETE FROM {table} WHERE ac_id = %s", (ac_id,))
+
+            if aps:
+                sql = """
+                    INSERT INTO wifi_ap
+                    (ap_mac, ap_name, ap_group, online_status, ap_ip, model, sw_version,
+                     client_count, lldp_name, lldp_port, ac_id, last_seen_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                    ap_name = VALUES(ap_name), ap_group = VALUES(ap_group),
+                    online_status = VALUES(online_status), ap_ip = VALUES(ap_ip),
+                    model = VALUES(model), sw_version = VALUES(sw_version),
+                    client_count = VALUES(client_count), lldp_name = VALUES(lldp_name),
+                    lldp_port = VALUES(lldp_port), ac_id = VALUES(ac_id),
+                    last_seen_at = VALUES(last_seen_at)
+                """
+                values = [(i['ap_mac'], i['ap_name'], i['ap_group'], i['online_status'], i['ap_ip'],
+                           i['model'], i['sw_version'], i['client_count'], i['lldp_name'],
+                           i['lldp_port'], ac_id, i['last_seen_at']) for i in aps]
+                self.cursor.executemany(sql, values)
+
+            if radios:
+                sql = """
+                    INSERT INTO wifi_radio
+                    (ap_mac, radio_id, wlan_type, band, channel_status, channel, bandwidth,
+                     utilization, interference_rate, client_count, tx_power, max_power, ac_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                    wlan_type = VALUES(wlan_type), band = VALUES(band),
+                    channel_status = VALUES(channel_status), channel = VALUES(channel),
+                    bandwidth = VALUES(bandwidth), utilization = VALUES(utilization),
+                    interference_rate = VALUES(interference_rate), client_count = VALUES(client_count),
+                    tx_power = VALUES(tx_power), max_power = VALUES(max_power), ac_id = VALUES(ac_id)
+                """
+                values = [(i['ap_mac'], i['radio_id'], i['wlan_type'], i['band'], i['channel_status'],
+                           i['channel'], i['bandwidth'], i['utilization'], i['interference_rate'],
+                           i['client_count'], i['tx_power'], i['max_power'], ac_id) for i in radios]
+                self.cursor.executemany(sql, values)
+
+            if ssids:
+                sql = """
+                    INSERT INTO wifi_ssid
+                    (ap_mac, radio_id, seq, ssid, client_count, ssid_status, ac_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                    ssid = VALUES(ssid), client_count = VALUES(client_count),
+                    ssid_status = VALUES(ssid_status), ac_id = VALUES(ac_id)
+                """
+                values = [(i['ap_mac'], i['radio_id'], i['seq'], i['ssid'], i['client_count'],
+                           i['ssid_status'], ac_id) for i in ssids]
+                self.cursor.executemany(sql, values)
+
+            if clients:
+                sql = """
+                    INSERT INTO wifi_client
+                    (client_mac, username, ap_mac, ap_name, radio_id, band, channel,
+                     ssid, status, vlan_id, ip, up_rate, down_rate, rssi, ac_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                    username = VALUES(username), ap_mac = VALUES(ap_mac), ap_name = VALUES(ap_name),
+                    radio_id = VALUES(radio_id), band = VALUES(band), channel = VALUES(channel),
+                    ssid = VALUES(ssid), status = VALUES(status), vlan_id = VALUES(vlan_id),
+                    ip = VALUES(ip), up_rate = VALUES(up_rate), down_rate = VALUES(down_rate),
+                    rssi = VALUES(rssi), ac_id = VALUES(ac_id)
+                """
+                values = [(i['client_mac'], i['username'], i['ap_mac'], i['ap_name'], i['radio_id'],
+                           i['band'], i['channel'], i['ssid'], i['status'], i['vlan_id'],
+                           i['ip'], i['up_rate'], i['down_rate'], i['rssi'], ac_id) for i in clients]
+                self.cursor.executemany(sql, values)
+
+            self.conn.commit()
+            logger.info(f"AC {ac_id} 快照已替换: AP {len(aps or [])}, 射频 {len(radios or [])}, "
+                        f"SSID {len(ssids or [])}, 终端 {len(clients or [])}")
+            return True
+
+        except Exception as e:
+            logger.error(f"替换AC {ac_id} Wi-Fi快照失败: {e}")
+            self.conn.rollback()
+            return False
+
     def close(self):
         """关闭数据库连接"""
         try:
