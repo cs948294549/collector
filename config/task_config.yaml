@@ -93,13 +93,13 @@ tasks:
     enabled: true
 
   # Wi-Fi 快照采集任务
-#  - id: collect_wifi_snapshot
-#    type: cron
-#    module: scripts.collect_wifi
-#    function: run
-#    schedule: "*/5 * * * *"  # 每5分钟执行一次
-#    description: "采集Wi-Fi AC下AP/射频/SSID/终端快照"
-#    enabled: true
+  - id: collect_wifi_snapshot
+    type: cron
+    module: scripts.collect_wifi
+    function: run
+    schedule: "*/5 * * * *"  # 每5分钟执行一次
+    description: "采集Wi-Fi AC下AP/射频/SSID/终端快照"
+    enabled: true
 
   # 数据清理任务
   - id: clean_old_data
