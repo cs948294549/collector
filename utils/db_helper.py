@@ -618,18 +618,18 @@ class DBHelper:
             if aps:
                 sql = """
                     INSERT INTO wifi_ap
-                    (ap_mac, ap_name, ap_group, online_status, ap_ip, model, sw_version,
+                    (ap_mac, ap_name, sn, ap_group, online_status, ap_ip, model, sw_version,
                      client_count, lldp_name, lldp_port, ac_id, last_seen_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
-                    ap_name = VALUES(ap_name), ap_group = VALUES(ap_group),
+                    ap_name = VALUES(ap_name), sn = VALUES(sn), ap_group = VALUES(ap_group),
                     online_status = VALUES(online_status), ap_ip = VALUES(ap_ip),
                     model = VALUES(model), sw_version = VALUES(sw_version),
                     client_count = VALUES(client_count), lldp_name = VALUES(lldp_name),
                     lldp_port = VALUES(lldp_port), ac_id = VALUES(ac_id),
                     last_seen_at = VALUES(last_seen_at)
                 """
-                values = [(i['ap_mac'], i['ap_name'], i['ap_group'], i['online_status'], i['ap_ip'],
+                values = [(i['ap_mac'], i['ap_name'], i['sn'], i['ap_group'], i['online_status'], i['ap_ip'],
                            i['model'], i['sw_version'], i['client_count'], i['lldp_name'],
                            i['lldp_port'], ac_id, i['last_seen_at']) for i in aps]
                 self.cursor.executemany(sql, values)

@@ -10,7 +10,7 @@ class WlanAP(object):
     各厂商 WLAN MIB 完全不同，按型号分开写，OID 与取值解析都在对应方法内部，
     输出结构保持一致（与 wifi_ap 表字段一一对应）。
 
-    说明：model / sw_version / lldp_port 的 OID 尚未按实机核对，
+    说明：lldp_port 的 OID 尚未按实机核对，
           方法里先置空，采不到的字段入库为空，不影响采集跑通。
     '''
     def __init__(self, ip, community="public", vendor="huawei", ac_id=0):
@@ -37,19 +37,22 @@ class WlanAP(object):
         '''
         华为 AC（AC6508 等）HUAWEI-WLAN-AP-MIB
         索引为 AP MAC(6 位)，统一转小写冒号格式
-        在线状态注释见方法内 state_map
+        运行状态 8=normal 为 online，其余均为 offline
         OID 需按实机 snmpwalk 核对后固化
         '''
         oid_nodes = {
+            "sn": "1.3.6.1.4.1.2011.6.139.13.3.3.1.2",
+            "model": "1.3.6.1.4.1.2011.6.139.13.3.3.1.3",
             "ap_name": "1.3.6.1.4.1.2011.6.139.13.3.3.1.4",
             "ap_group": "1.3.6.1.4.1.2011.6.139.13.3.3.1.5",
             "online_status": "1.3.6.1.4.1.2011.6.139.13.3.3.1.6",
+            "sw_version": "1.3.6.1.4.1.2011.6.139.13.3.3.1.7",
             "ap_ip": "1.3.6.1.4.1.2011.6.139.13.3.3.1.13",
             "client_count": "1.3.6.1.4.1.2011.6.139.13.3.3.1.44",
             "lldp_name": "1.3.6.1.4.1.2011.6.139.13.3.6.1.8",
         }
-        # 在线状态枚举，取值含义待实机确认
-        state_map = {1: "online", 2: "offline"}
+        # 运行状态：8=normal 视为 online，其余（idle/autofind/fault/config/download/standby 等）均视为 offline
+        normal_state = 8
 
         try:
             oid_cache = {}
@@ -77,6 +80,24 @@ class WlanAP(object):
                     oid_cache[ap_mac] = {}
                 oid_cache[ap_mac]["ap_name"] = toStr(oid_infos[oid])
 
+            # AP SN
+            oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["sn"], max_repetitions=10)
+            for oid in (oid_infos or {}).keys():
+                if oid_infos[oid] is None:
+                    continue
+                ap_mac = macIndex(oid, oid_nodes["sn"])
+                if ap_mac in oid_cache.keys():
+                    oid_cache[ap_mac]["sn"] = toStr(oid_infos[oid])
+
+            # AP 型号
+            oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["model"], max_repetitions=10)
+            for oid in (oid_infos or {}).keys():
+                if oid_infos[oid] is None:
+                    continue
+                ap_mac = macIndex(oid, oid_nodes["model"])
+                if ap_mac in oid_cache.keys():
+                    oid_cache[ap_mac]["model"] = toStr(oid_infos[oid])
+
             # AP 分组
             oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["ap_group"], max_repetitions=10)
             for oid in (oid_infos or {}).keys():
@@ -97,7 +118,16 @@ class WlanAP(object):
                         state = int(oid_infos[oid])
                     except Exception:
                         continue
-                    oid_cache[ap_mac]["online_status"] = state_map.get(state, "unknown")
+                    oid_cache[ap_mac]["online_status"] = "online" if state == normal_state else "offline"
+
+            # 软件版本
+            oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["sw_version"], max_repetitions=10)
+            for oid in (oid_infos or {}).keys():
+                if oid_infos[oid] is None:
+                    continue
+                ap_mac = macIndex(oid, oid_nodes["sw_version"])
+                if ap_mac in oid_cache.keys():
+                    oid_cache[ap_mac]["sw_version"] = toStr(oid_infos[oid])
 
             # AP IP
             oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["ap_ip"], max_repetitions=10)
@@ -138,11 +168,12 @@ class WlanAP(object):
                 responds.append({
                     "ap_mac": ap_mac,
                     "ap_name": ap.get("ap_name", ""),
+                    "sn": ap.get("sn", ""),
                     "ap_group": ap.get("ap_group", ""),
                     "online_status": ap.get("online_status", "unknown"),
                     "ap_ip": ap.get("ap_ip", ""),
-                    "model": "",        # 型号 OID 待补
-                    "sw_version": "",   # 软件版本 OID 待补
+                    "model": ap.get("model", ""),
+                    "sw_version": ap.get("sw_version", ""),
                     "client_count": ap.get("client_count", 0),
                     "lldp_name": ap.get("lldp_name", ""),
                     "lldp_port": "",    # 上级端口 OID 待补
