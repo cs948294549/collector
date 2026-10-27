@@ -53,8 +53,8 @@ class WlanClient(object):
             "down_rate": "1.3.6.1.4.1.2011.6.139.18.1.2.1.38",
             "rssi": "1.3.6.1.4.1.2011.6.139.18.1.2.1.42",
         }
-        # 终端状态枚举，取值含义待实机确认
-        state_map = {1: "online", 2: "offline"}
+        # 终端状态：3=normal 视为 online，其余（idle 等）均视为 offline
+        normal_state = 3
 
         try:
             oid_cache = {}
@@ -154,7 +154,9 @@ class WlanClient(object):
                 client_mac = clientIndex(oid, oid_nodes["status"])
                 if client_mac in oid_cache.keys():
                     state = toInt(oid_infos[oid])
-                    oid_cache[client_mac]["status"] = state_map.get(state, "unknown")
+                    if state is None:
+                        continue
+                    oid_cache[client_mac]["status"] = "online" if state == normal_state else "offline"
 
             # VLAN
             oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["vlan_id"], max_repetitions=10)

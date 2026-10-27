@@ -21,9 +21,9 @@ from utils.db_queue import get_db_queue
 
 logger = logging.getLogger(__name__)
 
-# 多台 AC 并发上限 10，单台超时 30 秒
+# 多台 AC 并发上限 10；单台串行实测约 106 秒（AP 7 / 射频 14 / SSID 13 / 终端 72），超时给到 180 秒
 AC_CONCURRENCY = 10
-AC_TIMEOUT = 30
+AC_TIMEOUT = 180
 
 
 async def collect_single_ac(ac: dict):

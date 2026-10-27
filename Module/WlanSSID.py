@@ -43,8 +43,8 @@ class WlanSSID(object):
             "client_count": "1.3.6.1.4.1.2011.6.139.17.1.1.1.9",
             "ssid_status": "1.3.6.1.4.1.2011.6.139.17.1.1.1.10",
         }
-        # SSID 状态枚举，取值含义待实机确认
-        state_map = {1: "up", 2: "down"}
+        # SSID 状态：1=normal 视为 up，其余均视为 down
+        normal_state = 1
 
         try:
             oid_cache = {}
@@ -99,7 +99,9 @@ class WlanSSID(object):
                 key = "%s|%s|%s" % (ap_mac, radio_id, seq)
                 if key in oid_cache.keys():
                     state = toInt(oid_infos[oid])
-                    oid_cache[key]["ssid_status"] = state_map.get(state, "unknown")
+                    if state is None:
+                        continue
+                    oid_cache[key]["ssid_status"] = "up" if state == normal_state else "down"
 
             responds = []
             for key in oid_cache.keys():
