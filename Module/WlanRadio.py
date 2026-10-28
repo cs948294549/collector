@@ -91,7 +91,8 @@ class WlanRadio(object):
                     oid_cache[key] = {"ap_mac": ap_mac, "radio_id": radio_id, "client_count": 0}
                 oid_cache[key]["wlan_type"] = toStr(oid_infos[oid])
 
-            # 频段
+            # 频段：OID 返回枚举值 1/2/3，映射成可读频段名
+            band_map = {1: "2.4G", 2: "5G", 3: "6G"}
             oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["band"], max_repetitions=10)
             for oid in (oid_infos or {}).keys():
                 if oid_infos[oid] is None:
@@ -99,7 +100,9 @@ class WlanRadio(object):
                 ap_mac, radio_id = radioIndex(oid, oid_nodes["band"])
                 key = "%s|%s" % (ap_mac, radio_id)
                 if key in oid_cache.keys():
-                    oid_cache[key]["band"] = toStr(oid_infos[oid])
+                    band = toInt(oid_infos[oid])
+                    # 枚举值映射；非枚举实现（直接回频段字符串）原样保留
+                    oid_cache[key]["band"] = band_map.get(band, toStr(oid_infos[oid]))
 
             # 信道状态
             oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["channel_status"], max_repetitions=10)
