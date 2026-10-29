@@ -91,7 +91,7 @@ class DeviceInfo(object):
             dev_info = {}
             dev_info["ip"] = self.ip
             sysname = await snmpget(ip=self.ip, community=self.community, oid=oid_nodes["sysname"])
-            dev_info["sysname"] = sysname.decode("utf-8", "ignore")
+            dev_info["sysname"] = sysname.decode("utf-8", "ignore").replace(".vdian.net", "")
 
             # 处理特定设备的 sysDescr 错误 - 按 IP 匹配
             if self.ip == "10.39.224.72":
