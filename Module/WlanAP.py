@@ -1,5 +1,6 @@
 # WLAN AP 采集（wifi_ap）
 from utils.snmp_tool import snmpwalk
+from utils.fortinet_api import fetch_monitor
 import time
 
 
@@ -290,6 +291,9 @@ class WlanAP(object):
             timestamp = int(time.time())
             timestamp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
 
+            # REST 补采：MIB 里没有 LLDP 邻居；接口失败时返回空字典，AP 仍按 SNMP 结果出
+            api_aps = await self.__getFortinetApiAPs()
+
             responds = []
             for wtp_id in oid_cache.keys():
                 ap = oid_cache[wtp_id]
@@ -301,6 +305,17 @@ class WlanAP(object):
                     online_status = "unknown"
                 else:
                     online_status = "online" if state == online_state else "offline"
+                lldp_name, lldp_port = "", ""
+                api_ap = api_aps.get(wtp_id) or api_aps.get(ap["ap_mac"])
+                if api_ap:
+                    # lldp 是列表，取第一条有 system_name 的上游邻居
+                    for neighbor in (api_ap.get("lldp") or []):
+                        if not isinstance(neighbor, dict):
+                            continue
+                        if str(neighbor.get("system_name") or "").strip():
+                            lldp_name = str(neighbor.get("system_name")).strip()
+                            lldp_port = str(neighbor.get("port_id") or "").strip()
+                            break
                 responds.append({
                     "ap_mac": ap["ap_mac"],
                     "ap_name": ap.get("ap_name") or wtp_id,
@@ -311,8 +326,8 @@ class WlanAP(object):
                     "model": ap.get("model", ""),
                     "sw_version": ap.get("sw_version", ""),
                     "client_count": ap.get("client_count") or 0,
-                    "lldp_name": "",    # 飞塔 MIB 不提供 LLDP
-                    "lldp_port": "",
+                    "lldp_name": lldp_name,     # MIB 不提供，REST 取不到时留空
+                    "lldp_port": lldp_port,
                     "ac_id": self.ac_id,
                     "last_seen_at": timestamp_str,
                 })
@@ -320,6 +335,26 @@ class WlanAP(object):
         except Exception as e:
             print("AP采集异常=", self.ip, str(e))
             return None
+
+    async def __getFortinetApiAPs(self):
+        '''
+        REST /api/v2/monitor/wifi/managed_ap 的 AP 列表，按 WTP ID 和 AP MAC 双索引
+        接口不可用时返回空字典，调用方据此保留 SNMP 结果
+        '''
+        rows = await fetch_monitor(self.ip, "wifi/managed_ap")
+        if not isinstance(rows, list):
+            return {}
+        index = {}
+        for ap in rows:
+            if not isinstance(ap, dict):
+                continue
+            serial = str(ap.get("wtp_id") or "").strip()
+            ap_mac = str(ap.get("board_mac") or "").strip().lower()
+            if serial:
+                index[serial] = ap
+            if ap_mac:
+                index[ap_mac] = ap
+        return index
 
     async def __getH3cAPs(self):
         '''

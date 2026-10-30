@@ -1,5 +1,6 @@
 # WLAN 终端采集（wifi_client）
 from utils.snmp_tool import snmpwalk
+from utils.fortinet_api import fetch_monitor
 from utils.ipaddr import getIPaddressStr, getIPaddressStrV6
 import time
 
@@ -436,6 +437,10 @@ class WlanClient(object):
                     continue
                 clients[client["client_mac"]] = client
 
+            # REST 补采：Sta.Vlan 实机恒为 0，真实 VLAN / 瞬时带宽只在接口里有
+            # 接口失败时返回空字典，终端仍按 SNMP 结果出，相关字段保留 SNMP 值
+            api_clients = await self.__getFortinetApiClients()
+
             responds = []
             for client_mac in clients.keys():
                 client = clients[client_mac]
@@ -450,7 +455,7 @@ class WlanClient(object):
                 # 枚举外（如新型号）按信道兜底，6G 信道号与 2.4G 重叠，兜底不出 6G
                 if not band and channel:
                     band = "2.4G" if channel <= 14 else "5G"
-                responds.append({
+                item = {
                     "client_mac": client_mac,
                     "username": client.get("username", ""),
                     # 映射不到 AP 的终端照样入库，ap_mac 留空、ap_name 回退 WTP ID
@@ -467,11 +472,67 @@ class WlanClient(object):
                     "down_rate": client.get("down_rate"),
                     "rssi": client.get("rssi"),
                     "ac_id": self.ac_id,
-                })
+                }
+                api_client = api_clients.get(client_mac)
+                if api_client:
+                    self.__overlayApiClient(item, api_client)
+                responds.append(item)
             return responds
         except Exception as e:
             print("终端采集异常=", self.ip, str(e))
             return None
+
+    async def __getFortinetApiClients(self):
+        '''
+        REST /api/v2/monitor/wifi/client 的在线终端，按终端 MAC 建索引
+        接口不可用时返回空字典，调用方据此保留 SNMP 结果
+        '''
+        rows = await fetch_monitor(self.ip, "wifi/client")
+        if not isinstance(rows, list):
+            return {}
+        index = {}
+        for client in rows:
+            if not isinstance(client, dict):
+                continue
+            mac = str(client.get("mac") or "").strip().lower()
+            if mac:
+                index[mac] = client
+        return index
+
+    def __overlayApiClient(self, item, client):
+        '''
+        用 REST 字段覆盖终端行；只覆盖取得到值的字段，取不到就保留 SNMP 结果
+        up_rate / down_rate 对应带宽类字段（kbps），不能取 data_*rate_bps——那是 PHY 协商速率
+        '''
+        # Sta.Vlan 实机恒为 0，接口里是终端实际所在 VLAN（本例 136 / 128）
+        vlan_id = client.get("vlan_id")
+        if isinstance(vlan_id, int) and vlan_id > 0:
+            item["vlan_id"] = vlan_id
+
+        # radio_type 形如 802.11ax-5G，后半段即频段
+        radio_type = str(client.get("radio_type") or "").strip()
+        if radio_type:
+            band = {"2G": "2.4G", "5G": "5G", "6G": "6G"}.get(radio_type.rsplit("-", 1)[-1].upper())
+            if band:
+                item["band"] = band
+
+        channel = client.get("channel")
+        if isinstance(channel, int) and channel > 0:
+            item["channel"] = channel
+
+        # signal 单位 dBm，与 MIB 的 fgWcStaRssi 同口径
+        rssi = client.get("signal")
+        if isinstance(rssi, int) and rssi != 0:
+            item["rssi"] = rssi
+
+        # bandwidth_tx / bandwidth_rx：kbps 瞬时带宽，与 fgWcStaBandwidthTx/Rx 同义
+        # 大量为 0 是正常的（两次轮询之间没有流量），0 也要照实覆盖
+        down_rate = client.get("bandwidth_tx")
+        if isinstance(down_rate, (int, float)):
+            item["down_rate"] = int(down_rate) * 1000
+        up_rate = client.get("bandwidth_rx")
+        if isinstance(up_rate, (int, float)):
+            item["up_rate"] = int(up_rate) * 1000
 
     async def __getH3cClients(self):
         '''

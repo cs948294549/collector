@@ -1,5 +1,6 @@
 # WLAN 射频采集（wifi_radio）
 from utils.snmp_tool import snmpwalk
+from utils.fortinet_api import fetch_monitor
 import time
 
 
@@ -343,6 +344,10 @@ class WlanRadio(object):
                 if len(index) >= 2:
                     widths[index[:2]] = toInt(value)
 
+            # REST 补采：MIB 没有任何利用率字段，频段/带宽/协议也只有 profile 配置值
+            # 接口失败时这里返回空字典，射频仍按 SNMP 结果出，utilization 保持 None
+            api_radios = await self.__getFortinetApiRadios()
+
             responds = []
             for (wtp_id, radio_id) in oid_cache.keys():
                 radio = oid_cache[(wtp_id, radio_id)]
@@ -357,7 +362,7 @@ class WlanRadio(object):
                     wlan_type = type_map[band_type]
                 else:
                     wlan_type = toStr(bands[profile_key]) if profile_key in bands.keys() else ""
-                responds.append({
+                item = {
                     "ap_mac": radio["ap_mac"],
                     "radio_id": radio_id,
                     "wlan_type": wlan_type,
@@ -371,11 +376,91 @@ class WlanRadio(object):
                     "tx_power": radio.get("tx_power"),
                     "max_power": None,
                     "ac_id": self.ac_id,
-                })
+                }
+                # 先按 WTP ID 匹配，取不到再按 AP MAC（两者在实机上都唯一）
+                api_radio = api_radios.get((wtp_id, radio_id)) or api_radios.get((radio["ap_mac"], radio_id))
+                if api_radio:
+                    self.__overlayApiRadio(item, api_radio)
+                responds.append(item)
             return responds
         except Exception as e:
             print("射频采集异常=", self.ip, str(e))
             return None
+
+    async def __getFortinetApiRadios(self):
+        '''
+        REST /api/v2/monitor/wifi/managed_ap 的 AP 模式射频，按 (WTP ID 或 AP MAC, 射频 ID) 建索引
+        接口不可用时返回空字典，调用方据此保留 SNMP 结果
+        '''
+        rows = await fetch_monitor(self.ip, "wifi/managed_ap")
+        if not isinstance(rows, list):
+            return {}
+
+        def toInt(value):
+            try:
+                return int(str(value).strip())
+            except Exception:
+                return None
+
+        index = {}
+        for ap in rows:
+            if not isinstance(ap, dict):
+                continue
+            serial = str(ap.get("wtp_id") or "").strip()
+            ap_mac = str(ap.get("board_mac") or "").strip().lower()
+            for radio in (ap.get("radio") or []):
+                if not isinstance(radio, dict):
+                    continue
+                # monitor / disabled 等射频不在采集范围内，和 SNMP 路径口径保持一致
+                if str(radio.get("mode") or "").upper() != "AP":
+                    continue
+                radio_id = toInt(radio.get("radio_id"))
+                if radio_id is None:
+                    continue
+                if serial:
+                    index[(serial, radio_id)] = radio
+                if ap_mac:
+                    index[(ap_mac, radio_id)] = radio
+        return index
+
+    def __overlayApiRadio(self, item, radio):
+        '''
+        用 REST 字段覆盖射频行；只覆盖取得到值的字段，取不到就保留 SNMP 结果
+        '''
+        # channel_utilization_percent：整数 0-100，GUI 上的"信道利用率"
+        utilization = radio.get("channel_utilization_percent")
+        if isinstance(utilization, (int, float)):
+            item["utilization"] = round(float(utilization), 2)
+
+        # radio_type 形如 802.11ax-5G：前半是协议，后半是频段，比 profile 配置值更贴近运行态
+        radio_type = str(radio.get("radio_type") or "").strip()
+        if radio_type:
+            protocol, _, band_tag = radio_type.partition("-")
+            if protocol:
+                item["wlan_type"] = protocol
+            band = {"2G": "2.4G", "5G": "5G", "6G": "6G"}.get(band_tag.upper())
+            if band:
+                item["band"] = band
+
+        # channel_bonding 形如 20MHz / 40MHz，是实际协商宽度而非配置值
+        bonding = str(radio.get("channel_bonding") or "").strip().rstrip("MmHhzZ")
+        if bonding.isdigit():
+            item["bandwidth"] = int(bonding)
+
+        # oper_chan / oper_txpower 是运行态，优先于 SNMP 值
+        channel = radio.get("oper_chan")
+        if isinstance(channel, int) and channel > 0:
+            item["channel"] = channel
+            # 信道变了，SNMP 那条"按信道兜底"的频段结论也要跟着刷新
+            if not str(radio.get("radio_type") or "").strip():
+                item["band"] = "2.4G" if channel <= 14 else "5G"
+        tx_power = radio.get("oper_txpower")
+        if isinstance(tx_power, int):
+            item["tx_power"] = tx_power
+
+        client_count = radio.get("client_count")
+        if isinstance(client_count, int) and client_count >= 0:
+            item["client_count"] = client_count
 
     async def __getH3cRadios(self):
         '''
