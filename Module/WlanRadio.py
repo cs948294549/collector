@@ -26,6 +26,8 @@ class WlanRadio(object):
             return await self.__getH3cRadios()
         elif self.vendor == "ruijie":
             return await self.__getRuijieRadios()
+        elif self.vendor == "fortinet":
+            return await self.__getFortinetRadios()
         else:
             print("射频采集跳过=%s 未支持的厂商=%s" % (self.ip, self.vendor))
             return None
@@ -204,6 +206,170 @@ class WlanRadio(object):
                     "client_count": radio.get("client_count", 0),
                     "tx_power": radio.get("tx_power"),
                     "max_power": radio.get("max_power"),
+                    "ac_id": self.ac_id,
+                })
+            return responds
+        except Exception as e:
+            print("射频采集异常=", self.ip, str(e))
+            return None
+
+    async def __getFortinetRadios(self):
+        '''
+        飞塔 FortiGate 自带无线控制器（fgWc，1.3.6.1.4.1.12356.101.14）
+        运行态（模式 / 信道 / 功率 / 终端数）在 SessRadio 表（4.5.1），索引 vdom + WTP ID + 射频 ID
+        频段与信道宽度只有 profile 配置值，在 ProfRadio 表（4.2.1），索引 vdom + profile 名 + 射频 ID
+        WTP ID → AP MAC、WTP ID → profile 取 Session 表（4.4.1）
+        只保留 ap 模式的射频，monitor / disabled 等不入库
+        '''
+        base = "1.3.6.1.4.1.12356.101.14."
+        oid_nodes = {
+            "ap_mac": base + "4.4.1.6",
+            "profile": base + "4.4.1.11",
+            "mode": base + "4.5.1.3",
+            "channel": base + "4.5.1.7",
+            "tx_power": base + "4.5.1.8",
+            "client_count": base + "4.5.1.9",
+            "band": base + "4.2.1.11",
+            "bandwidth": base + "4.2.1.20",
+        }
+        # 射频模式：3=ap 为业务射频，其余（notExist/disabled/monitor/sniffer）均不入库
+        mode_ap = 3
+        # FgWcWtpRadioType 枚举 → 频段
+        band_map = {
+            2: "2.4G", 3: "2.4G", 5: "2.4G", 7: "2.4G", 8: "2.4G", 9: "2.4G",
+            13: "2.4G", 16: "2.4G", 17: "2.4G", 18: "2.4G",
+            1: "5G", 4: "5G", 6: "5G", 10: "5G", 11: "5G", 12: "5G",
+            14: "5G", 19: "5G", 20: "5G", 21: "5G",
+            15: "6G",
+        }
+        # FgWcWtpRadioType 枚举 → 协议
+        type_map = {
+            1: "802.11a", 2: "802.11b", 3: "802.11g", 8: "802.11g",
+            4: "802.11n", 5: "802.11n", 7: "802.11n", 9: "802.11n", 10: "802.11n",
+            6: "802.11ac", 11: "802.11ac", 12: "802.11ac",
+            13: "802.11ax", 14: "802.11ax", 15: "802.11ax", 16: "802.11ax", 17: "802.11ax",
+            18: "802.11ax", 19: "802.11ax", 20: "802.11ax", 21: "802.11ax",
+        }
+        # FgWcWtpChannelWidthType 枚举 → MHz，0=other 不填
+        width_map = {1: 20, 2: 40, 3: 80, 4: 160}
+
+        try:
+            oid_cache = {}
+
+            def strIndex(oid, prefix):
+                # 变长串索引：vdom . 长度 n . n 个 ASCII 字符 . 后续定长段，返回 (串, 后续段...)
+                try:
+                    keys = [int(i) for i in oid[len(prefix):].strip(".").split(".")]
+                except ValueError:
+                    return None
+                if len(keys) < 2:
+                    return None
+                count = keys[1]
+                if count <= 0 or len(keys) < 2 + count:
+                    return None
+                return ("".join([chr(i) for i in keys[2:2 + count]]),) + tuple(keys[2 + count:])
+
+            def toStr(value):
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", "ignore").strip()
+                return str(value).strip()
+
+            def toInt(value):
+                try:
+                    return int(str(value).strip())
+                except Exception:
+                    return None
+
+            def toMac(value):
+                if isinstance(value, bytes) and len(value) == 6 and value != b"\x00" * 6:
+                    return ":".join(["%02x" % b for b in value])
+                return ""
+
+            async def walkIndex(column_oid):
+                # walk 一列，返回 {(串, 后续段...): 原始值}
+                result = {}
+                oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=column_oid, max_repetitions=10)
+                for oid in (oid_infos or {}).keys():
+                    if oid_infos[oid] is None:
+                        continue
+                    index = strIndex(oid, column_oid)
+                    if index is None:
+                        continue
+                    result[index] = oid_infos[oid]
+                return result
+
+            # WTP ID → AP MAC
+            ap_macs = {}
+            for index, value in (await walkIndex(oid_nodes["ap_mac"])).items():
+                ap_mac = toMac(value)
+                if ap_mac:
+                    ap_macs[index[0]] = ap_mac
+
+            # WTP ID → profile
+            profiles = {}
+            for index, value in (await walkIndex(oid_nodes["profile"])).items():
+                profiles[index[0]] = toStr(value)
+
+            # 射频模式：以 SessRadio 表为行集，只建 ap 模式且能映射到 AP 的射频
+            for index, value in (await walkIndex(oid_nodes["mode"])).items():
+                if len(index) < 2 or index[0] not in ap_macs.keys():
+                    continue
+                if toInt(value) != mode_ap:
+                    continue
+                oid_cache[index[:2]] = {"ap_mac": ap_macs[index[0]], "radio_id": index[1], "client_count": 0}
+
+            # 信道
+            for index, value in (await walkIndex(oid_nodes["channel"])).items():
+                if index[:2] in oid_cache.keys():
+                    oid_cache[index[:2]]["channel"] = toInt(value)
+
+            # 当前功率
+            for index, value in (await walkIndex(oid_nodes["tx_power"])).items():
+                if index[:2] in oid_cache.keys():
+                    oid_cache[index[:2]]["tx_power"] = toInt(value)
+
+            # 射频在线数量
+            for index, value in (await walkIndex(oid_nodes["client_count"])).items():
+                if index[:2] in oid_cache.keys():
+                    oid_cache[index[:2]]["client_count"] = toInt(value) or 0
+
+            # 频段 / 信道宽度：按 (profile, 射频 ID) 查
+            bands = {}
+            for index, value in (await walkIndex(oid_nodes["band"])).items():
+                if len(index) >= 2:
+                    bands[index[:2]] = value
+            widths = {}
+            for index, value in (await walkIndex(oid_nodes["bandwidth"])).items():
+                if len(index) >= 2:
+                    widths[index[:2]] = toInt(value)
+
+            responds = []
+            for (wtp_id, radio_id) in oid_cache.keys():
+                radio = oid_cache[(wtp_id, radio_id)]
+                profile_key = (profiles.get(wtp_id, ""), radio_id)
+                band_type = toInt(bands.get(profile_key))
+                band = band_map.get(band_type, "")
+                channel = radio.get("channel")
+                # 枚举外（如新型号）按信道兜底，6G 信道号与 2.4G 重叠，兜底不出 6G
+                if not band and channel:
+                    band = "2.4G" if channel <= 14 else "5G"
+                if band_type in type_map.keys():
+                    wlan_type = type_map[band_type]
+                else:
+                    wlan_type = toStr(bands[profile_key]) if profile_key in bands.keys() else ""
+                responds.append({
+                    "ap_mac": radio["ap_mac"],
+                    "radio_id": radio_id,
+                    "wlan_type": wlan_type,
+                    "band": band,
+                    "channel_status": "up",     # 非 ap 模式的已在建行时丢弃
+                    "channel": channel,
+                    "bandwidth": width_map.get(widths.get(profile_key)),
+                    "utilization": None,        # 飞塔 MIB 不提供
+                    "interference_rate": None,
+                    "client_count": radio.get("client_count", 0),
+                    "tx_power": radio.get("tx_power"),
+                    "max_power": None,
                     "ac_id": self.ac_id,
                 })
             return responds

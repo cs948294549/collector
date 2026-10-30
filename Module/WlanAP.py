@@ -29,6 +29,8 @@ class WlanAP(object):
             return await self.__getH3cAPs()
         elif self.vendor == "ruijie":
             return await self.__getRuijieAPs()
+        elif self.vendor == "fortinet":
+            return await self.__getFortinetAPs()
         else:
             print("AP采集跳过=%s 未支持的厂商=%s" % (self.ip, self.vendor))
             return None
@@ -177,6 +179,140 @@ class WlanAP(object):
                     "client_count": ap.get("client_count", 0),
                     "lldp_name": ap.get("lldp_name", ""),
                     "lldp_port": "",    # 上级端口 OID 待补
+                    "ac_id": self.ac_id,
+                    "last_seen_at": timestamp_str,
+                })
+            return responds
+        except Exception as e:
+            print("AP采集异常=", self.ip, str(e))
+            return None
+
+    async def __getFortinetAPs(self):
+        '''
+        飞塔 FortiGate 自带无线控制器（fgWc，1.3.6.1.4.1.12356.101.14）
+        名称 / 管理状态在 Config 表（4.3.1），IP / 型号 / 版本 / 连接状态在 Session 表（4.4.1）
+        索引为 vdom + WTP ID（变长字符串），WTP ID 即 AP 序列号，直接作 sn
+        在线状态取 ConnectionState，不能用 WtpAdmin——后者是管理状态，AP 掉线后仍是 enable
+        '''
+        base = "1.3.6.1.4.1.12356.101.14."
+        oid_nodes = {
+            "admin": base + "4.3.1.2",
+            "ap_name": base + "4.3.1.3",
+            "ap_ip_remote": base + "4.4.1.3",
+            "ap_ip": base + "4.4.1.5",
+            "ap_mac": base + "4.4.1.6",
+            "connection_state": base + "4.4.1.7",
+            "ap_group": base + "4.4.1.11",
+            "model": base + "4.4.1.12",
+            "sw_version": base + "4.4.1.14",
+            "client_count": base + "4.4.1.17",
+        }
+        # 连接状态：2=onLine 视为 online，其余（offLine / 下载镜像 / 待连接等）均视为 offline
+        online_state = 2
+        # 管理状态：1=discovered 为发现未授权，不入库
+        admin_discovered = 1
+
+        try:
+            oid_cache = {}
+
+            def wtpIndex(oid, prefix):
+                # 变长串索引：vdom . 长度 n . n 个 ASCII 字符
+                try:
+                    keys = [int(i) for i in oid[len(prefix):].strip(".").split(".")]
+                except ValueError:
+                    return None
+                if len(keys) < 2:
+                    return None
+                count = keys[1]
+                if count <= 0 or len(keys) < 2 + count:
+                    return None
+                return "".join([chr(i) for i in keys[2:2 + count]])
+
+            def toStr(value):
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", "ignore").strip()
+                return str(value).strip()
+
+            def toInt(value):
+                try:
+                    return int(str(value).strip())
+                except Exception:
+                    return None
+
+            def toMac(value):
+                # PhysAddress 是 6 字节，按字节格式化，不能 decode；全 0 视为无效
+                if isinstance(value, bytes) and len(value) == 6 and value != b"\x00" * 6:
+                    return ":".join(["%02x" % b for b in value])
+                return ""
+
+            def toIp(value):
+                # InetAddress 是 4 字节，按字节格式化；全 0 视为无效
+                if isinstance(value, bytes) and len(value) == 4 and value != b"\x00" * 4:
+                    return ".".join([str(b) for b in value])
+                return ""
+
+            async def fill(column_oid, field, convert=None):
+                # 按 WTP ID 把一列填进 oid_cache，没有 MAC 的 AP 不建行
+                oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=column_oid, max_repetitions=10)
+                for oid in (oid_infos or {}).keys():
+                    if oid_infos[oid] is None:
+                        continue
+                    wtp_id = wtpIndex(oid, column_oid)
+                    if wtp_id is None or wtp_id not in oid_cache.keys():
+                        continue
+                    try:
+                        oid_cache[wtp_id][field] = convert(oid_infos[oid]) if convert else oid_infos[oid]
+                    except Exception:
+                        continue
+
+            # 以 MAC 建行：Session 表里没有 MAC 的 AP 落不了主键，直接跳过
+            oid_infos = await snmpwalk(ip=self.ip, community=self.community, oid=oid_nodes["ap_mac"], max_repetitions=10)
+            for oid in (oid_infos or {}).keys():
+                if oid_infos[oid] is None:
+                    continue
+                wtp_id = wtpIndex(oid, oid_nodes["ap_mac"])
+                ap_mac = toMac(oid_infos[oid])
+                if not wtp_id or not ap_mac:
+                    continue
+                oid_cache[wtp_id] = {"ap_mac": ap_mac, "sn": wtp_id}
+
+            await fill(oid_nodes["ap_name"], "ap_name", toStr)
+            await fill(oid_nodes["admin"], "admin", toInt)
+            await fill(oid_nodes["connection_state"], "state", toInt)
+            await fill(oid_nodes["ap_group"], "ap_group", toStr)
+            await fill(oid_nodes["model"], "model", toStr)
+            await fill(oid_nodes["sw_version"], "sw_version", toStr)
+            await fill(oid_nodes["client_count"], "client_count", toInt)
+            await fill(oid_nodes["ap_ip"], "ap_ip", toIp)
+            # CAPWAP 源 IP，过 NAT 时与 AP 真实 IP 不同，只作兜底
+            await fill(oid_nodes["ap_ip_remote"], "ap_ip_remote", toIp)
+
+            timestamp = int(time.time())
+            timestamp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+
+            responds = []
+            for wtp_id in oid_cache.keys():
+                ap = oid_cache[wtp_id]
+                # 发现未授权的 AP 不入库
+                if ap.get("admin") == admin_discovered:
+                    continue
+                state = ap.get("state")
+                if state is None:
+                    online_status = "unknown"
+                else:
+                    online_status = "online" if state == online_state else "offline"
+                responds.append({
+                    "ap_mac": ap["ap_mac"],
+                    "ap_name": ap.get("ap_name") or wtp_id,
+                    "sn": ap["sn"],
+                    "ap_group": ap.get("ap_group", ""),
+                    "online_status": online_status,
+                    "ap_ip": ap.get("ap_ip") or ap.get("ap_ip_remote") or "",
+                    "model": ap.get("model", ""),
+                    "sw_version": ap.get("sw_version", ""),
+                    "client_count": ap.get("client_count") or 0,
+                    "lldp_name": "",    # 飞塔 MIB 不提供 LLDP
+                    "lldp_port": "",
                     "ac_id": self.ac_id,
                     "last_seen_at": timestamp_str,
                 })
