@@ -126,6 +126,7 @@ class DBHelper:
                 INSERT INTO arps (ip, arp_mac, arp_ip, port_id, timestamp)
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
+                    arp_mac = VALUES(arp_mac),
                     port_id = VALUES(port_id),
                     timestamp = VALUES(timestamp)
             """
