@@ -54,12 +54,23 @@ class DBWriteQueue:
             return
 
         logger.info("正在停止数据库写入队列...")
+
+        # 先等待队列中剩余任务写完（此时 worker 仍在运行）
+        # 与 worker_task 一起等待，避免 worker 已异常退出时 join() 永久阻塞
+        join_task = asyncio.ensure_future(self.queue.join())
+        waiters = [join_task]
+        if self.worker_task:
+            waiters.append(self.worker_task)
+        done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+
+        if join_task not in done:
+            join_task.cancel()
+            logger.error(f"队列处理线程已提前退出，{self.queue.qsize()} 条任务未写入")
+
+        # 队列已排空，再停止 worker
         self.running = False
 
-        # 等待队列处理完成
-        await self.queue.join()
-
-        if self.worker_task:
+        if self.worker_task and not self.worker_task.done():
             self.worker_task.cancel()
             try:
                 await self.worker_task
@@ -120,11 +131,12 @@ class DBWriteQueue:
                             break
 
                     if batch:
-                        await self._process_batch(db, batch)
-
-                        # 标记任务完成
-                        for _ in batch:
-                            self.queue.task_done()
+                        try:
+                            await self._process_batch(db, batch)
+                        finally:
+                            # 无论写入成功与否都要标记完成，否则 join() 会永久阻塞
+                            for _ in batch:
+                                self.queue.task_done()
 
                         self.stats['queue_size'] = self.queue.qsize()
 
