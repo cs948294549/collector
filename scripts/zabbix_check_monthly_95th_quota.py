@@ -41,8 +41,8 @@ TRAFFIC_KEY_RE = re.compile(r'^net\.if\.(in|out)\[')
 INTERFACE_PAIRS = {
     "dc07": {
         "interfaces": [
-            {"host": "pcs1_dc07_m01.vdian.net", "port_id": "436231168"},
-            {"host": "pcs2_dc07_m01.vdian.net", "port_id": "436231168"},
+            {"host": "pcs1_dc07_m01", "port_id": "436231168"},
+            {"host": "pcs2_dc07_m01", "port_id": "436231168"},
         ],
         "thresholds_mbps": [600, 700, 800, 900, 1000, 1200, 1500],
     },
