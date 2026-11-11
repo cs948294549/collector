@@ -10,7 +10,10 @@ VENDOR_IDENTIFIERS = {
     'huawei': ['huawei', 'vrp', 'quidway', 'huarong', 'futurematrix'],
     'h3c': ['h3c', '3com', 'hp'],
     'juniper': ['juniper', 'junos'],
-    'arista': ['arista', 'eos']
+    'arista': ['arista', 'eos'],
+    'ruijie': ['ruijie'],
+    'dell': ['dell'],
+    'fortigate': ['fortigate'],
 }
 
 def identify_device_vendor(sys_descr: str) -> str:
