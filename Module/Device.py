@@ -62,8 +62,8 @@ def GetDeviceType(sysdesc):
         return "juniper"
     elif "HILLSTONE" in check_desc:
         return "hillstone"
-    # elif "FORTIGATE" in check_desc:
-    #     return "fortigate"
+    elif "FORTIGATE" in check_desc:
+        return "fortigate"
     else:
         return "default"
 
